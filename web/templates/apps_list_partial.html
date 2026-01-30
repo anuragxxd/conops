@@ -1,0 +1,32 @@
+{{define "apps-list"}}
+<table class="apps-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Repo</th>
+            <th>Branch</th>
+            <th>Status</th>
+            <th>Last Sync</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Apps}}
+        <tr class="app-row {{.Status}}">
+            <td>{{.Name}}</td>
+            <td><a href="{{.RepoURL}}" target="_blank">{{.RepoURL}}</a></td>
+            <td>{{.Branch}}</td>
+            <td><span class="badge {{.Status}}">{{.Status}}</span></td>
+            <td>{{.LastSyncAt}}</td>
+            <td>
+                <button hx-delete="/api/v1/apps/{{.Name}}" hx-confirm="Are you sure?" hx-target="closest tr" hx-swap="outerHTML" class="btn btn-danger btn-sm">Delete</button>
+            </td>
+        </tr>
+        {{else}}
+        <tr>
+            <td colspan="6" class="text-center">No apps registered.</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}

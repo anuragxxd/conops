@@ -1,0 +1,28 @@
+# Build stage
+FROM golang:1.23-alpine AS builder
+
+WORKDIR /app
+
+# Copy go mod and sum files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/agent ./cmd/agent
+
+# Final stage
+FROM alpine:3.19
+
+WORKDIR /app
+
+# Install docker CLI and compose plugin
+RUN apk add --no-cache docker-cli docker-cli-compose
+
+# Copy the binary from builder
+COPY --from=builder /app/agent .
+
+# Command to run
+CMD ["./agent"]

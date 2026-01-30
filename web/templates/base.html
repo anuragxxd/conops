@@ -1,0 +1,32 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConOps Dashboard</title>
+    <link rel="stylesheet" href="/ui/static/css/style.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>ConOps Controller</h1>
+            <nav>
+                <a href="/ui/apps">Apps</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        {{template "content" .}}
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>ConOps &copy; 2026</p>
+        </div>
+    </footer>
+</body>
+</html>
+{{end}}
