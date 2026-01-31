@@ -7,10 +7,26 @@ services:
       - "8080:8080"
     environment:
       - LOG_LEVEL=debug
+      - DB_TYPE=postgres # Switch to 'postgres' to use PostgreSQL
+      - DB_CONNECTION_STRING=postgres://conops:secret@postgres:5432/conops?sslmode=disable
     volumes:
       # Persist git repos if needed, though controller currently clones to /tmp
       # Map templates/static if you want to edit them without rebuilding
       - ./web:/app/web
+      - conops_data:/data
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=conops
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=conops
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
 
   agent:
     build:
@@ -27,3 +43,7 @@ services:
       - ./conops-agent-data:/app/conops-agent
     depends_on:
       - controller
+
+volumes:
+  conops_data:
+  postgres_data:

@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/conops/conops/pkg/api"
 	"github.com/conops/conops/pkg/controller"
+	"github.com/conops/conops/pkg/store"
 	"github.com/conops/conops/pkg/ui"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -30,10 +32,10 @@ type Server struct {
 	logger    *slog.Logger
 }
 
-func NewServer() *Server {
+func NewServer(registry *controller.Registry) *Server {
 	return &Server{
 		agents:    make(map[string]*AgentState),
-		registry:  controller.NewRegistry(),
+		registry:  registry,
 		taskQueue: controller.NewTaskQueue(),
 		logger:    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 	}
@@ -95,7 +97,45 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	server := NewServer()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	var dbStore store.Store
+	var err error
+
+	dbType := os.Getenv("DB_TYPE")
+	if dbType == "postgres" {
+		connString := os.Getenv("DB_CONNECTION_STRING")
+		if connString == "" {
+			logger.Error("DB_CONNECTION_STRING is required for postgres")
+			os.Exit(1)
+		}
+		dbStore, err = store.NewPostgresStore(context.Background(), connString)
+		if err != nil {
+			logger.Error("Failed to initialize postgres store", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("Using PostgreSQL store")
+	} else {
+		// Default to SQLite
+		// Ensure data directory exists
+		dataDir := "/data"
+		if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+			// Fallback for local development if /data doesn't exist
+			dataDir = "."
+		}
+		dbPath := filepath.Join(dataDir, "conops.db")
+
+		dbStore, err = store.NewSQLiteStore(dbPath)
+		if err != nil {
+			logger.Error("Failed to initialize sqlite store", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("Using SQLite store")
+	}
+	defer dbStore.Close()
+
+	registry := controller.NewRegistry(dbStore)
+	server := NewServer(registry)
 
 	// Start Git Watcher
 	watcher := controller.NewGitWatcher(server.registry, server.taskQueue, server.logger)

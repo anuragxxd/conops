@@ -2,6 +2,20 @@ package api
 
 import "time"
 
+// App represents a Git repository configuration to track.
+// Moved from controller/registry.go to avoid circular dependency with store package.
+type App struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	RepoURL        string    `json:"repo_url"`
+	Branch         string    `json:"branch"`
+	ComposePath    string    `json:"compose_path"`
+	PollInterval   string    `json:"poll_interval"` // Duration string e.g. "30s"
+	LastSeenCommit string    `json:"last_seen_commit"`
+	LastSyncAt     time.Time `json:"last_sync_at"`
+	Status         string    `json:"status"` // e.g., "active", "error"
+}
+
 // AgentRegistration represents the payload sent by an agent to register itself.
 type AgentRegistration struct {
 	ID           string   `json:"id"`
