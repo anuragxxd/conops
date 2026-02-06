@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/conops/conops/pkg/api"
+	"github.com/conops/conops/internal/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -107,8 +107,32 @@ func (s *PostgresStore) DeleteApp(ctx context.Context, id string) error {
 }
 
 func (s *PostgresStore) UpdateAppCommit(ctx context.Context, id, commitHash string) error {
-	query := `UPDATE apps SET last_seen_commit = $1, last_sync_at = $2, status = $3 WHERE id = $4`
-	ct, err := s.pool.Exec(ctx, query, commitHash, time.Now(), "active", id)
+	query := `UPDATE apps SET last_seen_commit = $1, status = $2 WHERE id = $3`
+	ct, err := s.pool.Exec(ctx, query, commitHash, "pending", id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("app not found")
+	}
+	return nil
+}
+
+func (s *PostgresStore) UpdateAppStatus(ctx context.Context, id, status string, lastSyncAt *time.Time) error {
+	if lastSyncAt == nil {
+		query := `UPDATE apps SET status = $1 WHERE id = $2`
+		ct, err := s.pool.Exec(ctx, query, status, id)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return fmt.Errorf("app not found")
+		}
+		return nil
+	}
+
+	query := `UPDATE apps SET status = $1, last_sync_at = $2 WHERE id = $3`
+	ct, err := s.pool.Exec(ctx, query, status, *lastSyncAt, id)
 	if err != nil {
 		return err
 	}

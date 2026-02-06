@@ -5,23 +5,21 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/conops/conops/pkg/api"
+	"github.com/conops/conops/internal/api"
 	"github.com/go-chi/chi/v5"
 )
 
 // Handler handles HTTP requests for the controller.
 type Handler struct {
-	Registry  *Registry
-	TaskQueue *TaskQueue
-	Logger    *slog.Logger
+	Registry *Registry
+	Logger   *slog.Logger
 }
 
 // NewHandler creates a new controller handler.
-func NewHandler(registry *Registry, taskQueue *TaskQueue, logger *slog.Logger) *Handler {
+func NewHandler(registry *Registry, logger *slog.Logger) *Handler {
 	return &Handler{
-		Registry:  registry,
-		TaskQueue: taskQueue,
-		Logger:    logger,
+		Registry: registry,
+		Logger:   logger,
 	}
 }
 

@@ -9,11 +9,14 @@ services:
       - LOG_LEVEL=debug
       - DB_TYPE=postgres # Switch to 'postgres' to use PostgreSQL
       - DB_CONNECTION_STRING=postgres://conops:secret@postgres:5432/conops?sslmode=disable
+      - CONOPS_RECONCILE_INTERVAL=10s
+      - CONOPS_SYNC_TIMEOUT=5m
     volumes:
-      # Persist git repos if needed, though controller currently clones to /tmp
-      # Map templates/static if you want to edit them without rebuilding
+      # Map templates/static if you want to edit them without rebuilding.
+      # Runtime cache directories live inside /app (.conops-cache and .conops-runtime).
       - ./web:/app/web
       - conops_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - postgres
 
@@ -27,22 +30,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
-
-  agent:
-    build:
-      context: .
-      dockerfile: Dockerfile.agent
-    environment:
-      - CONOPS_CONTROLLER_URL=http://controller:8080
-      - AGENT_ID=docker-agent-1
-      - POLL_INTERVAL=5s
-    volumes:
-      # Mount docker socket to allow agent to manage containers
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Mount a directory for the agent to store cloned repos/compose files
-      - ./conops-agent-data:/app/conops-agent
-    depends_on:
-      - controller
 
 volumes:
   conops_data:

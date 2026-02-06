@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/conops/conops/pkg/api"
+	"github.com/conops/conops/internal/api"
 	_ "modernc.org/sqlite" // Pure Go SQLite driver
 )
 
@@ -103,8 +103,40 @@ func (s *SQLiteStore) DeleteApp(ctx context.Context, id string) error {
 }
 
 func (s *SQLiteStore) UpdateAppCommit(ctx context.Context, id, commitHash string) error {
-	query := `UPDATE apps SET last_seen_commit = ?, last_sync_at = ?, status = ? WHERE id = ?`
-	result, err := s.db.ExecContext(ctx, query, commitHash, time.Now(), "active", id)
+	query := `UPDATE apps SET last_seen_commit = ?, status = ? WHERE id = ?`
+	result, err := s.db.ExecContext(ctx, query, commitHash, "pending", id)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("app not found")
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateAppStatus(ctx context.Context, id, status string, lastSyncAt *time.Time) error {
+	if lastSyncAt == nil {
+		query := `UPDATE apps SET status = ? WHERE id = ?`
+		result, err := s.db.ExecContext(ctx, query, status, id)
+		if err != nil {
+			return err
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rowsAffected == 0 {
+			return fmt.Errorf("app not found")
+		}
+		return nil
+	}
+
+	query := `UPDATE apps SET status = ?, last_sync_at = ? WHERE id = ?`
+	result, err := s.db.ExecContext(ctx, query, status, *lastSyncAt, id)
 	if err != nil {
 		return err
 	}

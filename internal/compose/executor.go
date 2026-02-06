@@ -1,4 +1,4 @@
-package agent
+package compose
 
 import (
 	"context"
@@ -22,13 +22,13 @@ type ComposeExecutor struct {
 // NewComposeExecutor creates a new executor.
 func NewComposeExecutor(logger *slog.Logger) *ComposeExecutor {
 	return &ComposeExecutor{
-		WorkDir: "./.conops-agent",
+		WorkDir: "./.conops-runtime",
 		Logger:  logger,
 	}
 }
 
 // Apply executes the compose file.
-func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envVars map[string]string, repoURL, branch, composePath string) (string, error) {
+func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envVars map[string]string, repoURL, branch, composePath, commitHash string) (string, error) {
 	appDir := filepath.Join(e.WorkDir, appID)
 	appDirAbs, err := filepath.Abs(appDir)
 	if err != nil {
@@ -36,10 +36,6 @@ func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envV
 	}
 	if err := os.MkdirAll(appDirAbs, 0755); err != nil {
 		return "", fmt.Errorf("failed to create app dir: %w", err)
-	}
-
-	if strings.TrimSpace(content) == "" {
-		return "", fmt.Errorf("compose content is empty")
 	}
 
 	if strings.TrimSpace(repoURL) == "" {
@@ -53,8 +49,8 @@ func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envV
 	}
 
 	repoDir := filepath.Join(appDirAbs, "repo")
-	e.Logger.Info("Preparing repo", "app_id", appID, "repo", repoURL, "branch", branch, "dir", repoDir)
-	if err := e.prepareRepo(ctx, appDirAbs, repoDir, repoURL, branch); err != nil {
+	e.Logger.Info("Preparing repo", "app_id", appID, "repo", repoURL, "branch", branch, "commit", commitHash, "dir", repoDir)
+	if err := e.prepareRepo(ctx, appDirAbs, repoDir, repoURL, branch, commitHash); err != nil {
 		return "", fmt.Errorf("prepare repo failed: %w", err)
 	}
 
@@ -64,16 +60,25 @@ func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envV
 		return "", fmt.Errorf("compose dir not found: %w", err)
 	}
 
-	if err := os.WriteFile(composeFullPath, []byte(content), 0644); err != nil {
-		return "", fmt.Errorf("failed to write compose file: %w", err)
+	wroteCompose := false
+	if strings.TrimSpace(content) != "" {
+		if err := os.WriteFile(composeFullPath, []byte(content), 0644); err != nil {
+			return "", fmt.Errorf("failed to write compose file: %w", err)
+		}
+		wroteCompose = true
+	} else {
+		if _, err := os.Stat(composeFullPath); err != nil {
+			return "", fmt.Errorf("compose file not found: %w", err)
+		}
 	}
 	composeFileName := filepath.Base(composeFullPath)
 
 	e.Logger.Info(
-		"Compose file written",
+		"Compose file ready",
 		"app_id", appID,
 		"path", composeFullPath,
 		"bytes", len(content),
+		"written", wroteCompose,
 	)
 
 	// Pull images
@@ -93,12 +98,22 @@ func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envV
 	return string(pullOut) + "\n" + string(upOut), nil
 }
 
-func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repoURL, branch string) error {
+func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repoURL, branch, commitHash string) error {
 	gitDir := filepath.Join(repoDir, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		_, err := e.runCommand(ctx, "git", []string{"clone", "--branch", branch, "--depth", "1", repoURL, repoDir}, appDir, nil)
+		cloneArgs := []string{"clone", "--branch", branch}
+		if commitHash == "" {
+			cloneArgs = append(cloneArgs, "--depth", "1")
+		}
+		cloneArgs = append(cloneArgs, repoURL, repoDir)
+		_, err := e.runCommand(ctx, "git", cloneArgs, appDir, nil)
 		if err != nil {
 			return err
+		}
+		if commitHash != "" {
+			if _, err := e.runCommand(ctx, "git", []string{"checkout", commitHash}, repoDir, nil); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -106,11 +121,24 @@ func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repo
 	if _, err := e.runCommand(ctx, "git", []string{"fetch", "origin"}, repoDir, nil); err != nil {
 		return err
 	}
-	if _, err := e.runCommand(ctx, "git", []string{"checkout", branch}, repoDir, nil); err != nil {
-		return err
-	}
-	if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", "origin/" + branch}, repoDir, nil); err != nil {
-		return err
+
+	if commitHash != "" {
+		if _, err := e.runCommand(ctx, "git", []string{"fetch", "origin", commitHash}, repoDir, nil); err != nil {
+			return err
+		}
+		if _, err := e.runCommand(ctx, "git", []string{"checkout", commitHash}, repoDir, nil); err != nil {
+			return err
+		}
+		if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", commitHash}, repoDir, nil); err != nil {
+			return err
+		}
+	} else {
+		if _, err := e.runCommand(ctx, "git", []string{"checkout", branch}, repoDir, nil); err != nil {
+			return err
+		}
+		if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", "origin/" + branch}, repoDir, nil); err != nil {
+			return err
+		}
 	}
 	if _, err := e.runCommand(ctx, "git", []string{"clean", "-fd"}, repoDir, nil); err != nil {
 		return err

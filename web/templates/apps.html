@@ -1,8 +1,8 @@
 {{define "content"}}
+{{if eq .Page "list"}}
 <div class="apps-header">
     <h2>Applications</h2>
     <div>
-        <button onclick="document.getElementById('add-app-modal').showModal()" class="btn btn-primary">New App</button>
         <button hx-get="/ui/apps/fragment" hx-target="#apps-list" class="btn btn-refresh">Refresh</button>
     </div>
 </div>
@@ -10,37 +10,83 @@
 <div id="apps-list" hx-get="/ui/apps/fragment" hx-trigger="load, every 10s">
     <div class="loading">Loading apps...</div>
 </div>
-
-<dialog id="add-app-modal" class="modal">
-    <div class="modal-header">
-        <h3>Register New Application</h3>
-        <button onclick="document.getElementById('add-app-modal').close()" class="btn-close">&times;</button>
-    </div>
-    <form hx-post="/ui/apps/add" hx-target="#apps-list" hx-swap="innerHTML" onsubmit="document.getElementById('add-app-modal').close()">
+{{else if eq .Page "new"}}
+<div class="page-head">
+    <a href="/ui/apps" class="back-link">Back to apps</a>
+    <h2>Register New Application</h2>
+</div>
+<div class="panel">
+    {{if .Error}}
+    <div class="alert alert-error">{{.Error}}</div>
+    {{end}}
+    <form method="post" action="/ui/apps">
         <div class="form-group">
             <label for="id">App ID</label>
-            <input type="text" id="id" name="id" required placeholder="e.g., my-app">
+            <input type="text" id="id" name="id" value="{{.Form.ID}}" required placeholder="e.g., my-app">
         </div>
         <div class="form-group">
             <label for="name">App Name</label>
-            <input type="text" id="name" name="name" required placeholder="e.g., My Application">
+            <input type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="e.g., My Application">
         </div>
         <div class="form-group">
             <label for="repo_url">Git Repository URL</label>
-            <input type="url" id="repo_url" name="repo_url" required placeholder="https://github.com/user/repo.git">
+            <input type="url" id="repo_url" name="repo_url" value="{{.Form.RepoURL}}" required placeholder="https://github.com/user/repo.git">
         </div>
         <div class="form-group">
             <label for="branch">Branch</label>
-            <input type="text" id="branch" name="branch" value="main">
+            <input type="text" id="branch" name="branch" value="{{.Form.Branch}}">
         </div>
         <div class="form-group">
             <label for="compose_path">Compose File Path</label>
-            <input type="text" id="compose_path" name="compose_path" value="compose.yaml">
+            <input type="text" id="compose_path" name="compose_path" value="{{.Form.ComposePath}}">
         </div>
-        <div class="modal-actions">
-            <button type="button" onclick="document.getElementById('add-app-modal').close()" class="btn">Cancel</button>
+        <div class="form-actions">
+            <a href="/ui/apps" class="btn">Cancel</a>
             <button type="submit" class="btn btn-primary">Register</button>
         </div>
     </form>
-</dialog>
+</div>
+{{else if eq .Page "detail"}}
+<div class="page-head">
+    <a href="/ui/apps" class="back-link">Back to apps</a>
+    <h2>{{.App.Name}}</h2>
+</div>
+<div class="panel">
+    <div class="detail-row">
+        <span class="detail-key">Status</span>
+        <span><span class="badge {{.App.Status}}">{{.App.Status}}</span></span>
+    </div>
+    <div class="detail-row">
+        <span class="detail-key">App ID</span>
+        <span><code>{{.App.ID}}</code></span>
+    </div>
+    <div class="detail-row">
+        <span class="detail-key">Repository</span>
+        <span><a href="{{.App.RepoURL}}" target="_blank">{{.App.RepoURL}}</a></span>
+    </div>
+    <div class="detail-row">
+        <span class="detail-key">Branch</span>
+        <span><code>{{.App.Branch}}</code></span>
+    </div>
+    <div class="detail-row">
+        <span class="detail-key">Compose Path</span>
+        <span><code>{{.App.ComposePath}}</code></span>
+    </div>
+    <div class="detail-row">
+        <span class="detail-key">Poll Interval</span>
+        <span><code>{{.App.PollInterval}}</code></span>
+    </div>
+    <div class="detail-row">
+        <span class="detail-key">Last Seen Commit</span>
+        <span><code>{{.App.LastSeenCommit}}</code></span>
+    </div>
+    <div class="detail-row">
+        <span class="detail-key">Last Sync</span>
+        <span>{{.App.LastSyncAt}}</span>
+    </div>
+    <div class="detail-actions">
+        <button hx-delete="/api/v1/apps/{{.App.ID}}" hx-confirm="Delete this app?" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location='/ui/apps';}" class="btn btn-danger">Delete App</button>
+    </div>
+</div>
+{{end}}
 {{end}}

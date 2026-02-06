@@ -13,32 +13,19 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
-// PendingTask represents a deployment task generated from a git commit.
-type PendingTask struct {
-	AppID          string
-	CommitHash     string
-	ComposeContent string
-	CreatedAt      time.Time
-	RepoURL        string
-	Branch         string
-	ComposePath    string
-}
-
 // GitWatcher monitors registered apps for changes.
 type GitWatcher struct {
-	Registry  *Registry
-	Logger    *slog.Logger
-	TaskQueue *TaskQueue
-	CacheDir  string
+	Registry *Registry
+	Logger   *slog.Logger
+	CacheDir string
 }
 
 // NewGitWatcher creates a new Git watcher.
-func NewGitWatcher(registry *Registry, taskQueue *TaskQueue, logger *slog.Logger) *GitWatcher {
+func NewGitWatcher(registry *Registry, logger *slog.Logger) *GitWatcher {
 	return &GitWatcher{
-		Registry:  registry,
-		TaskQueue: taskQueue,
-		Logger:    logger,
-		CacheDir:  "./.conops-cache",
+		Registry: registry,
+		Logger:   logger,
+		CacheDir: "./.conops-cache",
 	}
 }
 
@@ -138,7 +125,7 @@ func (w *GitWatcher) checkRepo(app *App) error {
 
 	// Pull latest changes
 	w.Logger.Debug("Fetching latest", "id", app.ID, "remote", "origin")
-	
+
 	// First fetch all changes
 	err = repo.Fetch(&git.FetchOptions{
 		RemoteName: "origin",
@@ -183,34 +170,12 @@ func (w *GitWatcher) checkRepo(app *App) error {
 
 	w.Logger.Info("New commit detected", "id", app.ID, "commit", commitHash)
 
-	// Read compose file
-	composePath := filepath.Join(repoPath, app.ComposePath)
-	w.Logger.Debug("Reading compose file", "id", app.ID, "path", composePath)
-	composeFile, err := os.ReadFile(composePath)
-	if err != nil {
-		return fmt.Errorf("failed to read compose file: %w", err)
-	}
-	w.Logger.Info("Compose file read", "id", app.ID, "path", composePath, "bytes", len(composeFile))
-
 	// Update registry
 	if err := w.Registry.UpdateCommit(app.ID, commitHash); err != nil {
 		return err
 	}
+	app.LastSeenCommit = commitHash
 	w.Logger.Debug("Registry updated", "id", app.ID, "commit", commitHash)
-
-	// Generate task
-	task := PendingTask{
-		AppID:          app.ID,
-		CommitHash:     commitHash,
-		ComposeContent: string(composeFile),
-		CreatedAt:      time.Now(),
-		RepoURL:        app.RepoURL,
-		Branch:         app.Branch,
-		ComposePath:    app.ComposePath,
-	}
-
-	w.TaskQueue.Enqueue(task)
-	w.Logger.Info("Task generated and queued", "id", app.ID, "compose_bytes", len(composeFile))
 
 	return nil
 }

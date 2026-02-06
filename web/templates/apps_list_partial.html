@@ -13,13 +13,14 @@
     <tbody>
         {{range .Apps}}
         <tr class="app-row {{.Status}}">
-            <td>{{.Name}}</td>
+            <td><a href="/ui/apps/{{.ID}}" class="app-name-link">{{.Name}}</a></td>
             <td><a href="{{.RepoURL}}" target="_blank">{{.RepoURL}}</a></td>
             <td>{{.Branch}}</td>
             <td><span class="badge {{.Status}}">{{.Status}}</span></td>
             <td>{{.LastSyncAt}}</td>
             <td>
-                <button hx-delete="/api/v1/apps/{{.Name}}" hx-confirm="Are you sure?" hx-target="closest tr" hx-swap="outerHTML" class="btn btn-danger btn-sm">Delete</button>
+                <a href="/ui/apps/{{.ID}}" class="btn btn-sm">View</a>
+                <button hx-delete="/api/v1/apps/{{.ID}}" hx-confirm="Are you sure?" hx-target="closest tr" hx-swap="outerHTML" class="btn btn-danger btn-sm">Delete</button>
             </td>
         </tr>
         {{else}}

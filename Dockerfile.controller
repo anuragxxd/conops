@@ -11,15 +11,18 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/controller ./cmd/controller
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/conops ./cmd/conops
 
 # Final stage
 FROM alpine:3.19
 
 WORKDIR /app
 
+# Install docker CLI, compose plugin, and git for monolith apply operations
+RUN apk add --no-cache docker-cli docker-cli-compose git openssh-client
+
 # Copy the binary from builder
-COPY --from=builder /app/controller .
+COPY --from=builder /app/conops .
 
 # Copy UI templates and static files
 COPY --from=builder /app/web ./web
@@ -28,4 +31,4 @@ COPY --from=builder /app/web ./web
 EXPOSE 8080
 
 # Command to run
-CMD ["./controller"]
+CMD ["./conops"]

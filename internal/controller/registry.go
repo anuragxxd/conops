@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/conops/conops/pkg/api"
-	"github.com/conops/conops/pkg/store"
+	"github.com/conops/conops/internal/api"
+	"github.com/conops/conops/internal/store"
 )
 
 // App is aliased to api.App for compatibility, though we should prefer api.App.
@@ -33,7 +33,7 @@ func (r *Registry) Add(app *api.App) error {
 		app.PollInterval = "30s"
 	}
 	app.Status = "registered"
-	app.LastSyncAt = time.Now()
+	app.LastSyncAt = time.Time{}
 
 	return r.store.CreateApp(context.Background(), app)
 }
@@ -61,4 +61,9 @@ func (r *Registry) Delete(id string) error {
 // UpdateCommit updates the latest commit hash for an app.
 func (r *Registry) UpdateCommit(id, commitHash string) error {
 	return r.store.UpdateAppCommit(context.Background(), id, commitHash)
+}
+
+// UpdateStatus updates app status and optionally the last sync time.
+func (r *Registry) UpdateStatus(id, status string, lastSyncAt *time.Time) error {
+	return r.store.UpdateAppStatus(context.Background(), id, status, lastSyncAt)
 }

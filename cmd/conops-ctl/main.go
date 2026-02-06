@@ -77,7 +77,7 @@ func usage() {
 
 // APIResponse matches the controller's response structure
 type APIResponse struct {
-	Message string `json:"message"`
+	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
 }
 
@@ -99,7 +99,7 @@ func listApps(baseURL string) {
 	var apiResp struct {
 		Data []App `json:"data"`
 	}
-	
+
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		fmt.Printf("Error decoding response: %v\n", err)
 		os.Exit(1)

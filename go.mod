@@ -5,7 +5,6 @@ go 1.25.5
 require (
 	github.com/go-chi/chi/v5 v5.2.4
 	github.com/go-git/go-git/v5 v5.16.4
-	github.com/gorilla/mux v1.8.1
 	github.com/jackc/pgx/v5 v5.8.0
 	modernc.org/sqlite v1.44.3
 )
