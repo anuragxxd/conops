@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ComposeExecutor handles Docker Compose operations.
@@ -72,6 +73,7 @@ func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envV
 		}
 	}
 	composeFileName := filepath.Base(composeFullPath)
+	projectName := composeProjectName(appID)
 
 	e.Logger.Info(
 		"Compose file ready",
@@ -83,19 +85,85 @@ func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envV
 
 	// Pull images
 	e.Logger.Info("Pulling images", "app_id", appID)
-	pullOut, err := e.runCommand(ctx, "docker", []string{"compose", "-f", composeFileName, "pull"}, composeDir, envVars)
+	pullOut, err := e.runCommand(ctx, "docker", []string{"compose", "-p", projectName, "-f", composeFileName, "pull"}, composeDir, envVars)
 	if err != nil {
 		return string(pullOut), fmt.Errorf("pull failed: %w", err)
 	}
 
 	// Up detached
 	e.Logger.Info("Applying configuration", "app_id", appID)
-	upOut, err := e.runCommand(ctx, "docker", []string{"compose", "-f", composeFileName, "up", "-d", "--remove-orphans"}, composeDir, envVars)
+	upOut, err := e.runCommand(ctx, "docker", []string{"compose", "-p", projectName, "-f", composeFileName, "up", "-d", "--remove-orphans"}, composeDir, envVars)
 	if err != nil {
 		return string(pullOut) + "\n" + string(upOut), fmt.Errorf("up failed: %w", err)
 	}
 
 	return string(pullOut) + "\n" + string(upOut), nil
+}
+
+// Destroy tears down app containers and networks without removing volumes.
+func (e *ComposeExecutor) Destroy(ctx context.Context, appID, composePath string, envVars map[string]string) (string, error) {
+	projectName := composeProjectName(appID)
+	appDirAbs, err := filepath.Abs(filepath.Join(e.WorkDir, appID))
+	if err != nil {
+		return "", fmt.Errorf("resolve app dir failed: %w", err)
+	}
+
+	repoDir := filepath.Join(appDirAbs, "repo")
+	if strings.TrimSpace(composePath) == "" {
+		composePath = "compose.yaml"
+	}
+	composeFullPath := filepath.Join(repoDir, composePath)
+	composeDir := filepath.Dir(composeFullPath)
+	composeFileName := filepath.Base(composeFullPath)
+
+	var outputs []string
+	downAttempted := false
+
+	if fileInfo, statErr := os.Stat(composeFullPath); statErr == nil && !fileInfo.IsDir() {
+		downAttempted = true
+		e.Logger.Info("Stopping app stack", "app_id", appID, "project", projectName, "compose_file", composeFullPath)
+		downOut, downErr := e.runCommand(
+			ctx,
+			"docker",
+			[]string{"compose", "-p", projectName, "-f", composeFileName, "down", "--remove-orphans"},
+			composeDir,
+			envVars,
+		)
+		if strings.TrimSpace(downOut) != "" {
+			outputs = append(outputs, downOut)
+		}
+		if downErr != nil {
+			return strings.Join(outputs, "\n"), fmt.Errorf("compose down failed: %w", downErr)
+		}
+	}
+
+	// Fallback cleanup for any lingering containers (including legacy runs before project naming).
+	legacyWorkingDir := composeDir
+	containerIDs, listErr := e.listContainerIDsForCleanup(ctx, projectName, legacyWorkingDir)
+	if listErr != nil {
+		return strings.Join(outputs, "\n"), listErr
+	}
+	if len(containerIDs) > 0 {
+		e.Logger.Info("Removing lingering containers", "app_id", appID, "containers", len(containerIDs))
+		args := append([]string{"rm", "-f"}, containerIDs...)
+		rmOut, rmErr := e.runCommand(ctx, "docker", args, appDirAbs, nil)
+		if strings.TrimSpace(rmOut) != "" {
+			outputs = append(outputs, rmOut)
+		}
+		if rmErr != nil {
+			return strings.Join(outputs, "\n"), fmt.Errorf("docker rm failed: %w", rmErr)
+		}
+	}
+
+	if !downAttempted && len(containerIDs) == 0 && e.Logger != nil {
+		e.Logger.Info("No running resources found for app", "app_id", appID, "project", projectName)
+	}
+
+	if removeErr := os.RemoveAll(appDirAbs); removeErr != nil {
+		e.Logger.Warn("Failed to remove app runtime directory", "app_id", appID, "dir", appDirAbs, "error", removeErr)
+	}
+
+	return strings.Join(outputs, "\n"), nil
 }
 
 func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repoURL, branch, commitHash string) error {
@@ -198,6 +266,116 @@ func (e *ComposeExecutor) runCommand(ctx context.Context, cmd string, args []str
 	)
 
 	return string(output), nil
+}
+
+func (e *ComposeExecutor) listContainerIDsForCleanup(ctx context.Context, projectName, workingDir string) ([]string, error) {
+	idSet := make(map[string]struct{})
+	workDir := e.WorkDir
+	if workDir == "" {
+		workDir = "."
+	}
+	if _, err := os.Stat(workDir); err != nil {
+		workDir = "."
+	}
+
+	byProject, err := e.listContainerIDsByFilter(ctx, []string{fmt.Sprintf("label=com.docker.compose.project=%s", projectName)}, workDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range byProject {
+		idSet[id] = struct{}{}
+	}
+
+	if strings.TrimSpace(workingDir) != "" {
+		byWorkingDir, err := e.listContainerIDsByFilter(ctx, []string{fmt.Sprintf("label=com.docker.compose.project.working_dir=%s", workingDir)}, workDir)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range byWorkingDir {
+			idSet[id] = struct{}{}
+		}
+	}
+
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
+
+func (e *ComposeExecutor) listContainerIDsByFilter(ctx context.Context, filters []string, workDir string) ([]string, error) {
+	args := []string{"ps", "-aq"}
+	for _, filter := range filters {
+		args = append(args, "--filter", filter)
+	}
+
+	output, err := e.runCommand(ctx, "docker", args, workDir, nil)
+	if err != nil {
+		return nil, fmt.Errorf("docker ps failed: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	ids := make([]string, 0, len(lines))
+	for _, line := range lines {
+		id := strings.TrimSpace(line)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func composeProjectName(appID string) string {
+	const fallback = "conops-app"
+	raw := strings.ToLower(strings.TrimSpace(appID))
+	if raw == "" {
+		return fallback
+	}
+
+	var b strings.Builder
+	lastDash := false
+	for _, r := range raw {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+
+	project := strings.Trim(b.String(), "-_")
+	if project == "" {
+		project = fallback
+	}
+	if !startsWithAlphaNum(project) {
+		project = "app-" + project
+	}
+	if len(project) > 63 {
+		project = project[:63]
+		project = strings.Trim(project, "-_")
+	}
+	if project == "" {
+		return fallback
+	}
+	return project
+}
+
+func startsWithAlphaNum(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, first := range value {
+		return unicode.IsLetter(first) || unicode.IsDigit(first)
+	}
+	return false
 }
 
 func sortedKeys(values map[string]string) []string {

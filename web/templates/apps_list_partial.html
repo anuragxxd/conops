@@ -1,5 +1,5 @@
 {{define "apps-list"}}
-<table class="apps-table">
+<table>
     <thead>
         <tr>
             <th>Name</th>
@@ -12,20 +12,22 @@
     </thead>
     <tbody>
         {{range .Apps}}
-        <tr class="app-row {{.Status}}">
-            <td><a href="/ui/apps/{{.ID}}" class="app-name-link">{{.Name}}</a></td>
+        <tr>
+            <td><a href="/ui/apps/{{.ID}}"><strong>{{.Name}}</strong></a></td>
             <td><a href="{{.RepoURL}}" target="_blank">{{.RepoURL}}</a></td>
             <td>{{.Branch}}</td>
-            <td><span class="badge {{.Status}}">{{.Status}}</span></td>
+            <td>{{.Status}}</td>
             <td>{{.LastSyncAt}}</td>
             <td>
-                <a href="/ui/apps/{{.ID}}" class="btn btn-sm">View</a>
-                <button hx-delete="/api/v1/apps/{{.ID}}" hx-confirm="Are you sure?" hx-target="closest tr" hx-swap="outerHTML" class="btn btn-danger btn-sm">Delete</button>
+                <div role="group">
+                    <a href="/ui/apps/{{.ID}}" role="button" class="secondary">View</a>
+                    <button hx-delete="/api/v1/apps/{{.ID}}" hx-confirm="Are you sure?" hx-target="closest tr" hx-swap="outerHTML" class="contrast">Delete</button>
+                </div>
             </td>
         </tr>
         {{else}}
         <tr>
-            <td colspan="6" class="text-center">No apps registered.</td>
+            <td colspan="6">No apps registered.</td>
         </tr>
         {{end}}
     </tbody>

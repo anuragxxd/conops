@@ -75,7 +75,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	appHandler := controller.NewHandler(registry, logger)
+	appHandler := controller.NewHandler(registry, executor, logger)
 	uiHandler, err := ui.NewHandler(registry, "web/templates")
 	if err != nil {
 		logger.Error("Failed to initialize UI handler", "error", err)

@@ -1,92 +1,66 @@
 {{define "content"}}
 {{if eq .Page "list"}}
-<div class="apps-header">
-    <h2>Applications</h2>
-    <div>
-        <button hx-get="/ui/apps/fragment" hx-target="#apps-list" class="btn btn-refresh">Refresh</button>
+<section>
+    <div role="group">
+        <a href="/ui/apps/new" role="button">New App</a>
+        <button hx-get="/ui/apps/fragment" hx-target="#apps-list" class="secondary">Refresh</button>
     </div>
-</div>
-
-<div id="apps-list" hx-get="/ui/apps/fragment" hx-trigger="load, every 10s">
-    <div class="loading">Loading apps...</div>
-</div>
+    <div id="apps-list" hx-get="/ui/apps/fragment" hx-trigger="load, every 10s">
+        <article aria-busy="true">Loading apps...</article>
+    </div>
+</section>
 {{else if eq .Page "new"}}
-<div class="page-head">
-    <a href="/ui/apps" class="back-link">Back to apps</a>
+<section>
+    <p><a href="/ui/apps">Back to apps</a></p>
+    <article>
     <h2>Register New Application</h2>
-</div>
-<div class="panel">
     {{if .Error}}
-    <div class="alert alert-error">{{.Error}}</div>
+    <p><mark>{{.Error}}</mark></p>
     {{end}}
     <form method="post" action="/ui/apps">
-        <div class="form-group">
-            <label for="id">App ID</label>
-            <input type="text" id="id" name="id" value="{{.Form.ID}}" required placeholder="e.g., my-app">
-        </div>
-        <div class="form-group">
-            <label for="name">App Name</label>
-            <input type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="e.g., My Application">
-        </div>
-        <div class="form-group">
-            <label for="repo_url">Git Repository URL</label>
-            <input type="url" id="repo_url" name="repo_url" value="{{.Form.RepoURL}}" required placeholder="https://github.com/user/repo.git">
-        </div>
-        <div class="form-group">
-            <label for="branch">Branch</label>
-            <input type="text" id="branch" name="branch" value="{{.Form.Branch}}">
-        </div>
-        <div class="form-group">
-            <label for="compose_path">Compose File Path</label>
-            <input type="text" id="compose_path" name="compose_path" value="{{.Form.ComposePath}}">
-        </div>
-        <div class="form-actions">
-            <a href="/ui/apps" class="btn">Cancel</a>
-            <button type="submit" class="btn btn-primary">Register</button>
+        <label for="id">App ID</label>
+        <input type="text" id="id" name="id" value="{{.Form.ID}}" required placeholder="e.g., my-app">
+
+        <label for="name">App Name</label>
+        <input type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="e.g., My Application">
+
+        <label for="repo_url">Git Repository URL</label>
+        <input type="url" id="repo_url" name="repo_url" value="{{.Form.RepoURL}}" required placeholder="https://github.com/user/repo.git">
+
+        <label for="branch">Branch</label>
+        <input type="text" id="branch" name="branch" value="{{.Form.Branch}}">
+
+        <label for="compose_path">Compose File Path</label>
+        <input type="text" id="compose_path" name="compose_path" value="{{.Form.ComposePath}}">
+
+        <div role="group">
+            <a href="/ui/apps" role="button" class="secondary">Cancel</a>
+            <button type="submit">Register</button>
         </div>
     </form>
-</div>
+    </article>
+</section>
 {{else if eq .Page "detail"}}
-<div class="page-head">
-    <a href="/ui/apps" class="back-link">Back to apps</a>
-    <h2>{{.App.Name}}</h2>
-</div>
-<div class="panel">
-    <div class="detail-row">
-        <span class="detail-key">Status</span>
-        <span><span class="badge {{.App.Status}}">{{.App.Status}}</span></span>
-    </div>
-    <div class="detail-row">
-        <span class="detail-key">App ID</span>
-        <span><code>{{.App.ID}}</code></span>
-    </div>
-    <div class="detail-row">
-        <span class="detail-key">Repository</span>
-        <span><a href="{{.App.RepoURL}}" target="_blank">{{.App.RepoURL}}</a></span>
-    </div>
-    <div class="detail-row">
-        <span class="detail-key">Branch</span>
-        <span><code>{{.App.Branch}}</code></span>
-    </div>
-    <div class="detail-row">
-        <span class="detail-key">Compose Path</span>
-        <span><code>{{.App.ComposePath}}</code></span>
-    </div>
-    <div class="detail-row">
-        <span class="detail-key">Poll Interval</span>
-        <span><code>{{.App.PollInterval}}</code></span>
-    </div>
-    <div class="detail-row">
-        <span class="detail-key">Last Seen Commit</span>
-        <span><code>{{.App.LastSeenCommit}}</code></span>
-    </div>
-    <div class="detail-row">
-        <span class="detail-key">Last Sync</span>
-        <span>{{.App.LastSyncAt}}</span>
-    </div>
-    <div class="detail-actions">
-        <button hx-delete="/api/v1/apps/{{.App.ID}}" hx-confirm="Delete this app?" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location='/ui/apps';}" class="btn btn-danger">Delete App</button>
-    </div>
-</div>
+<section>
+    <p><a href="/ui/apps">Back to apps</a></p>
+    <article>
+        <header>
+            <h2>{{.App.Name}}</h2>
+            <p>Status: <strong>{{.App.Status}}</strong></p>
+        </header>
+        <table>
+            <tbody>
+                <tr><th scope="row">App ID</th><td><code>{{.App.ID}}</code></td></tr>
+                <tr><th scope="row">Repository</th><td><a href="{{.App.RepoURL}}" target="_blank">{{.App.RepoURL}}</a></td></tr>
+                <tr><th scope="row">Branch</th><td><code>{{.App.Branch}}</code></td></tr>
+                <tr><th scope="row">Compose Path</th><td><code>{{.App.ComposePath}}</code></td></tr>
+                <tr><th scope="row">Poll Interval</th><td><code>{{.App.PollInterval}}</code></td></tr>
+                <tr><th scope="row">Last Seen Commit</th><td><code>{{.App.LastSeenCommit}}</code></td></tr>
+                <tr><th scope="row">Last Sync</th><td>{{.App.LastSyncAt}}</td></tr>
+            </tbody>
+        </table>
+        <button hx-delete="/api/v1/apps/{{.App.ID}}" hx-confirm="Delete this app?" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location='/ui/apps';}" class="contrast">Delete App</button>
+    </article>
+</section>
 {{end}}
 {{end}}

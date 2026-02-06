@@ -6,27 +6,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ConOps Dashboard</title>
     <link rel="icon" type="image/png" href="/ui/static/assets/conops.png">
-    <link rel="stylesheet" href="/ui/static/css/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 </head>
 <body>
-    <header>
-        <div class="container">
-            <a href="/ui/apps" class="brand">
-                <img src="/ui/static/assets/conops.png" alt="ConOps logo" class="brand-logo">
-                <span class="brand-text">ConOps Controller</span>
-            </a>
-        </div>
+    <header class="container">
+        <nav>
+            <ul>
+                <li style="width: 100%; display: flex; justify-content: center;">
+                    <a href="/ui/apps" class="contrast" style="display:inline-flex;align-items:center;gap:.6rem;text-decoration:none;">
+                        <img src="/ui/static/assets/conops.png" alt="ConOps logo" width="56" height="56" style="display:block;">
+                        <h1>ConOps</h1>
+                    </a>
+                </li>
+            </ul>
+        </nav>
     </header>
 
     <main class="container">
         {{template "content" .}}
     </main>
 
-    <footer>
-        <div class="container">
-            <p>ConOps &copy; 2026</p>
-        </div>
+    <footer class="container">
+        <small>ConOps &copy; 2026</small>
     </footer>
 </body>
 </html>
