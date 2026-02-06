@@ -22,6 +22,22 @@ type ComposeExecutor struct {
 	Logger  *slog.Logger
 }
 
+// ProjectRuntimeState summarizes runtime state for one compose project.
+type ProjectRuntimeState struct {
+	ContainerCount int
+	RunningCount   int
+	ExitedCount    int
+	UnhealthyCount int
+}
+
+// IsHealthy reports whether all tracked service containers are running and healthy.
+func (s ProjectRuntimeState) IsHealthy() bool {
+	if s.ContainerCount == 0 {
+		return false
+	}
+	return s.RunningCount == s.ContainerCount && s.ExitedCount == 0 && s.UnhealthyCount == 0
+}
+
 // NewComposeExecutor creates a new executor.
 func NewComposeExecutor(logger *slog.Logger) *ComposeExecutor {
 	return &ComposeExecutor{
@@ -168,6 +184,60 @@ func (e *ComposeExecutor) Destroy(ctx context.Context, appID, composePath string
 	return strings.Join(outputs, "\n"), nil
 }
 
+// SnapshotProjects captures compose runtime status from Docker for all projects.
+func (e *ComposeExecutor) SnapshotProjects(ctx context.Context) (map[string]ProjectRuntimeState, error) {
+	output, err := e.runCommand(
+		ctx,
+		"docker",
+		[]string{
+			"ps",
+			"-a",
+			"--format",
+			`{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.oneoff"}}|{{.Status}}`,
+		},
+		e.runtimeWorkDir(),
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("docker ps failed: %w", err)
+	}
+
+	snapshot := make(map[string]ProjectRuntimeState)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+
+		projectName := strings.TrimSpace(parts[0])
+		oneOff := strings.TrimSpace(parts[1])
+		status := strings.TrimSpace(parts[2])
+		if projectName == "" || strings.EqualFold(oneOff, "true") || oneOff == "1" {
+			continue
+		}
+
+		state := snapshot[projectName]
+		state.ContainerCount++
+		if dockerStatusIsRunning(status) {
+			state.RunningCount++
+		} else {
+			state.ExitedCount++
+		}
+		if strings.Contains(strings.ToLower(status), "(unhealthy)") {
+			state.UnhealthyCount++
+		}
+		snapshot[projectName] = state
+	}
+
+	return snapshot, nil
+}
+
 func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repoURL, branch, commitHash string, deployKey []byte) error {
 	gitEnv, cleanup, err := e.buildGitEnv(appDir, deployKey)
 	if err != nil {
@@ -309,13 +379,7 @@ func (e *ComposeExecutor) runCommand(ctx context.Context, cmd string, args []str
 
 func (e *ComposeExecutor) listContainerIDsForCleanup(ctx context.Context, projectName, workingDir string) ([]string, error) {
 	idSet := make(map[string]struct{})
-	workDir := e.WorkDir
-	if workDir == "" {
-		workDir = "."
-	}
-	if _, err := os.Stat(workDir); err != nil {
-		workDir = "."
-	}
+	workDir := e.runtimeWorkDir()
 
 	byProject, err := e.listContainerIDsByFilter(ctx, []string{fmt.Sprintf("label=com.docker.compose.project=%s", projectName)}, workDir)
 	if err != nil {
@@ -341,6 +405,17 @@ func (e *ComposeExecutor) listContainerIDsForCleanup(ctx context.Context, projec
 	}
 	slices.Sort(ids)
 	return ids, nil
+}
+
+func (e *ComposeExecutor) runtimeWorkDir() string {
+	workDir := strings.TrimSpace(e.WorkDir)
+	if workDir == "" {
+		return "."
+	}
+	if _, err := os.Stat(workDir); err != nil {
+		return "."
+	}
+	return workDir
 }
 
 func (e *ComposeExecutor) listContainerIDsByFilter(ctx context.Context, filters []string, workDir string) ([]string, error) {
@@ -405,6 +480,15 @@ func composeProjectName(appID string) string {
 		return fallback
 	}
 	return project
+}
+
+// ProjectNameForApp returns the deterministic compose project name for an app ID.
+func ProjectNameForApp(appID string) string {
+	return composeProjectName(appID)
+}
+
+func dockerStatusIsRunning(status string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(status)), "up ")
 }
 
 func startsWithAlphaNum(value string) bool {

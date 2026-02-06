@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/conops/conops/internal/repoauth"
@@ -169,6 +170,10 @@ func (w *GitWatcher) checkRepo(app *App) error {
 		return fmt.Errorf("head error: %w", err)
 	}
 	commitHash := ref.Hash().String()
+	commitMessage := ""
+	if commitObj, commitErr := repo.CommitObject(ref.Hash()); commitErr == nil {
+		commitMessage = commitSubject(commitObj.Message)
+	}
 	w.Logger.Debug("HEAD resolved", "id", app.ID, "commit", commitHash)
 
 	// Check if changed
@@ -180,13 +185,24 @@ func (w *GitWatcher) checkRepo(app *App) error {
 	w.Logger.Info("New commit detected", "id", app.ID, "commit", commitHash)
 
 	// Update registry
-	if err := w.Registry.UpdateCommit(app.ID, commitHash); err != nil {
+	if err := w.Registry.UpdateCommitWithMessage(app.ID, commitHash, commitMessage); err != nil {
 		return err
 	}
 	app.LastSeenCommit = commitHash
+	app.LastSeenCommitMessage = commitMessage
 	w.Logger.Debug("Registry updated", "id", app.ID, "commit", commitHash)
 
 	return nil
+}
+
+func commitSubject(message string) string {
+	for _, line := range strings.Split(strings.ReplaceAll(message, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (w *GitWatcher) authForApp(app *App) (transport.AuthMethod, error) {

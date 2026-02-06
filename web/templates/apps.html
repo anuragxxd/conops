@@ -1,76 +1,207 @@
 {{define "content"}}
 {{if eq .Page "list"}}
-<section>
-    <div role="group">
-        <a href="/ui/apps/new" role="button">New App</a>
-        <button hx-get="/ui/apps/fragment" hx-target="#apps-list" class="secondary">Refresh</button>
+<section class="space-y-4">
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+            <h1 class="text-3xl font-semibold tracking-tight">Applications</h1>
+            <p class="text-base-content/70 mt-1">Track repositories and reconcile Docker Compose deployments.</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="/ui/apps/new" class="btn btn-primary">New app</a>
+            <button hx-get="/ui/apps/fragment" hx-target="#apps-list" class="btn btn-outline">Refresh</button>
+        </div>
     </div>
-    <div id="apps-list" hx-get="/ui/apps/fragment" hx-trigger="load, every 10s">
-        <article aria-busy="true">Loading apps...</article>
+    <div id="apps-list" hx-get="/ui/apps/fragment" hx-trigger="load, every 10s" class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body">
+            <div class="flex items-center gap-2 text-base-content/70">
+                <span class="loading loading-spinner loading-sm"></span>
+                <span>Loading apps...</span>
+            </div>
+        </div>
     </div>
 </section>
 {{else if eq .Page "new"}}
-<section>
-    <p><a href="/ui/apps">Back to apps</a></p>
-    <article>
-    <h2>Register New Application</h2>
+<section class="space-y-4">
+    <a href="/ui/apps" class="link link-hover text-sm text-base-content/70">Back to apps</a>
+    <article class="card bg-base-100 border border-base-300 shadow-sm">
+    <div class="card-body gap-4">
+        <div>
+            <h1 class="text-3xl font-semibold tracking-tight">Register application</h1>
+            <p class="text-base-content/70 mt-1">Add a repository, branch, and compose file path to start reconciliation.</p>
+        </div>
+        
     {{if .Error}}
-    <p><mark>{{.Error}}</mark></p>
+    <div role="alert" class="alert alert-error alert-soft">
+      <span>{{.Error}}</span>
+    </div>
     {{end}}
-    <form method="post" action="/ui/apps">
-        <label for="name">App Name</label>
-        <input type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="e.g., My Application">
+    <form method="post" action="/ui/apps" class="space-y-4">
+        <div class="form-control">
+            <label for="name">App name</label>
+            <input class="input input-bordered w-full" type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="For example, Payments API">
+        </div>
 
-        <label for="repo_url">Git Repository URL</label>
-        <input type="text" id="repo_url" name="repo_url" value="{{.Form.RepoURL}}" required placeholder="git@github.com:user/repo.git or https://github.com/user/repo.git">
+        <div class="form-control">
+            <label for="repo_url">Git repository URL</label>
+            <input class="input input-bordered w-full" type="text" id="repo_url" name="repo_url" value="{{.Form.RepoURL}}" required placeholder="git@github.com:org/repo.git">
+        </div>
 
-        <label for="repo_auth_method">Repository Access</label>
-        <select id="repo_auth_method" name="repo_auth_method">
-            <option value="public" {{if eq .Form.RepoAuth "public"}}selected{{end}}>Public repository</option>
-            <option value="deploy_key" {{if eq .Form.RepoAuth "deploy_key"}}selected{{end}}>Private GitHub (deploy key)</option>
-        </select>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="form-control">
+            <label for="repo_auth_method">Repository access</label>
+            <select class="select select-bordered w-full" id="repo_auth_method" name="repo_auth_method">
+                <option value="public" {{if eq .Form.RepoAuth "public"}}selected{{end}}>Public repository</option>
+                <option value="deploy_key" {{if eq .Form.RepoAuth "deploy_key"}}selected{{end}}>Private GitHub (deploy key)</option>
+            </select>
+        </div>
 
-        <label for="deploy_key">Deploy Private Key</label>
-        <textarea id="deploy_key" name="deploy_key" rows="8" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">{{.Form.DeployKey}}</textarea>
-        <small>Required only when using private GitHub deploy keys.</small>
+        <div class="form-control">
+            <label for="branch">Branch</label>
+            <input class="input input-bordered w-full" type="text" id="branch" name="branch" value="{{.Form.Branch}}">
+        </div>
+        </div>
 
-        <label for="branch">Branch</label>
-        <input type="text" id="branch" name="branch" value="{{.Form.Branch}}">
+        <div class="form-control">
+            <label for="compose_path">Compose file path</label>
+            <input class="input input-bordered w-full" type="text" id="compose_path" name="compose_path" value="{{.Form.ComposePath}}">
+        </div>
 
-        <label for="compose_path">Compose File Path</label>
-        <input type="text" id="compose_path" name="compose_path" value="{{.Form.ComposePath}}">
+        <div class="form-control">
+            <label for="deploy_key">Deploy private key</label>
+            <textarea class="textarea textarea-bordered min-h-40 w-full" id="deploy_key" name="deploy_key" rows="8" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">{{.Form.DeployKey}}</textarea>
+            <div class="label"><span class="label-text-alt text-base-content/70">Only required when using private GitHub deploy keys.</span></div>
+        </div>
 
-        <div role="group">
-            <a href="/ui/apps" role="button" class="secondary">Cancel</a>
-            <button type="submit">Register</button>
+        <div class="flex items-center justify-end gap-2">
+            <a href="/ui/apps" class="btn btn-outline">Cancel</a>
+            <button type="submit" class="btn btn-primary">Register</button>
         </div>
     </form>
+    </div>
     </article>
 </section>
 {{else if eq .Page "detail"}}
-<section>
-    <p><a href="/ui/apps">Back to apps</a></p>
-    <article>
-        <header>
-            <h2>{{.App.Name}}</h2>
-            <p>Status: <strong>{{.App.Status}}</strong></p>
+<section class="space-y-4">
+    <a href="/ui/apps" class="link link-hover text-sm text-base-content/70">Back to apps</a>
+    <article class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body gap-4">
+        <header class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div>
+                <h1 class="text-3xl font-semibold tracking-tight">{{.App.Name}}</h1>
+                <p class="text-base-content/70 mt-1">Current status and repository tracking details.</p>
+            </div>
+            <span class="badge badge-lg
+                {{if eq .App.Status "synced"}}badge-success
+                {{else if eq .App.Status "syncing"}}badge-info
+                {{else if eq .App.Status "pending"}}badge-warning
+                {{else if eq .App.Status "error"}}badge-error
+                {{else}}badge-neutral{{end}}">
+                {{.App.Status}}
+            </span>
         </header>
-        <table>
-            <tbody>
-                <tr><th scope="row">App ID</th><td><code>{{.App.ID}}</code></td></tr>
-                <tr><th scope="row">Repository</th><td><a href="{{.App.RepoURL}}" target="_blank">{{.App.RepoURL}}</a></td></tr>
-                <tr><th scope="row">Branch</th><td><code>{{.App.Branch}}</code></td></tr>
-                <tr><th scope="row">Compose Path</th><td><code>{{.App.ComposePath}}</code></td></tr>
-                <tr><th scope="row">Poll Interval</th><td><code>{{.App.PollInterval}}</code></td></tr>
-                <tr><th scope="row">Last Seen Commit</th><td><code>{{.App.LastSeenCommit}}</code></td></tr>
-                <tr><th scope="row">Last Sync</th><td>{{.App.LastSyncAt}}</td></tr>
-            </tbody>
-        </table>
-        <div role="group">
-            <button hx-post="/api/v1/apps/{{.App.ID}}/sync" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location.reload();}">Force Sync</button>
-            <button hx-delete="/api/v1/apps/{{.App.ID}}" hx-confirm="Delete this app?" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location='/ui/apps';}" class="contrast">Delete App</button>
+
+        <dl class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">App ID</dt>
+                <dd class="mt-1"><code>{{.App.ID}}</code></dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Repository</dt>
+                <dd class="mt-1"><a class="link link-hover" href="{{.App.RepoURL}}" target="_blank">{{.App.RepoURL}}</a></dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Repository access</dt>
+                <dd class="mt-1"><code>{{.App.RepoAuth}}</code></dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Branch</dt>
+                <dd class="mt-1"><code>{{.App.Branch}}</code></dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Compose path</dt>
+                <dd class="mt-1"><code>{{.App.ComposePath}}</code></dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Poll interval</dt>
+                <dd class="mt-1"><code>{{.App.PollInterval}}</code></dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Desired commit</dt>
+                <dd class="mt-1"><code>{{.App.LastSeenCommit}}</code></dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Desired commit message</dt>
+                <dd class="mt-1">{{.App.LastSeenCommitMessage}}</dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Last synced commit</dt>
+                <dd class="mt-1"><code>{{.App.LastSyncedCommit}}</code></dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Last synced commit message</dt>
+                <dd class="mt-1">{{.App.LastSyncedCommitMessage}}</dd>
+                </div>
+            </div>
+            <div class="card bg-base-200 border border-base-300">
+                <div class="card-body p-4">
+                <dt class="text-xs uppercase tracking-wide text-base-content/60">Last sync</dt>
+                <dd class="mt-1">{{.App.LastSyncAt}}</dd>
+                </div>
+            </div>
+        </dl>
+
+        <div class="flex flex-wrap items-center gap-2">
+            <button hx-post="/api/v1/apps/{{.App.ID}}/sync" hx-target="body" hx-swap="none" hx-indicator="#sync-indicator" hx-on::after-request="if(event.detail.successful){window.location.reload();}" class="btn btn-primary">Force sync</button>
+            <span id="sync-indicator" class="htmx-indicator text-info flex items-center gap-2 font-medium">
+                <span class="loading loading-spinner loading-sm"></span>
+                Syncing...
+            </span>
+            <button hx-delete="/api/v1/apps/{{.App.ID}}" hx-confirm="Delete this app?" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location='/ui/apps';}" class="btn btn-error btn-outline">Delete app</button>
+        </div>
+
+        {{if .App.LastSyncError}}
+        <div class="space-y-2">
+            <h2 class="text-lg font-semibold">Last sync error</h2>
+            <div role="alert" class="alert alert-error alert-soft">
+                <span>{{.App.LastSyncError}}</span>
+            </div>
+        </div>
+        {{end}}
+
+        {{if .App.LastSyncOutput}}
+        <div class="space-y-2">
+            <h2 class="text-lg font-semibold">Last sync logs</h2>
+            <div class="mockup-code bg-neutral text-neutral-content">
+                <pre class="whitespace-pre-wrap break-words"><code>{{.App.LastSyncOutput}}</code></pre>
+            </div>
+        </div>
+        {{end}}
         </div>
     </article>
+    {{if eq .App.Status "syncing"}}
+    <script>
+        setTimeout(function () { window.location.reload(); }, 5000);
+    </script>
+    {{end}}
 </section>
 {{end}}
 {{end}}

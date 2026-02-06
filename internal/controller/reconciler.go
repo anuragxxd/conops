@@ -107,13 +107,33 @@ func (r *Reconciler) reconcileOnce() {
 		r.mu.Unlock()
 	}()
 
+	var runtimeSnapshot map[string]compose.ProjectRuntimeState
+	if snapshot, err := r.captureRuntimeSnapshot(); err != nil {
+		if r.Logger != nil {
+			r.Logger.Warn("Failed to capture runtime snapshot; skipping runtime drift checks", "error", err)
+		}
+	} else {
+		runtimeSnapshot = snapshot
+	}
+
 	apps := r.Registry.List()
 	for _, app := range apps {
+		if app.Status == "syncing" {
+			r.requeuePending(app, "recovering_interrupted_sync")
+		}
+
 		if app.LastSeenCommit == "" {
 			continue
 		}
+
+		if app.Status == "synced" && runtimeSnapshot != nil {
+			if reason := r.runtimeDriftReason(app.ID, runtimeSnapshot); reason != "" {
+				r.requeuePending(app, reason)
+			}
+		}
+
 		switch app.Status {
-		case "pending", "syncing":
+		case "pending":
 		case "error":
 			if !r.Config.RetryErrors {
 				continue
@@ -125,6 +145,50 @@ func (r *Reconciler) reconcileOnce() {
 		if err := r.syncApp(app); err != nil && r.Logger != nil {
 			r.Logger.Error("App sync failed", "app_id", app.ID, "error", err)
 		}
+	}
+}
+
+func (r *Reconciler) captureRuntimeSnapshot() (map[string]compose.ProjectRuntimeState, error) {
+	if r.Executor == nil {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return r.Executor.SnapshotProjects(ctx)
+}
+
+func (r *Reconciler) runtimeDriftReason(appID string, snapshot map[string]compose.ProjectRuntimeState) string {
+	projectName := compose.ProjectNameForApp(appID)
+	state, ok := snapshot[projectName]
+	if !ok || state.ContainerCount == 0 {
+		return "runtime_missing"
+	}
+	if state.UnhealthyCount > 0 {
+		return "runtime_unhealthy"
+	}
+	if state.ExitedCount > 0 {
+		return "runtime_exited"
+	}
+	if state.RunningCount < state.ContainerCount {
+		return "runtime_not_running"
+	}
+	return ""
+}
+
+func (r *Reconciler) requeuePending(app *App, reason string) {
+	if app.Status == "pending" {
+		return
+	}
+	if err := r.Registry.UpdateStatus(app.ID, "pending", nil); err != nil {
+		if r.Logger != nil {
+			r.Logger.Warn("Failed to requeue app for reconciliation", "app_id", app.ID, "reason", reason, "error", err)
+		}
+		return
+	}
+	app.Status = "pending"
+	if r.Logger != nil {
+		r.Logger.Info("Requeued app for reconciliation", "app_id", app.ID, "reason", reason)
 	}
 }
 
@@ -148,12 +212,29 @@ func (r *Reconciler) syncApp(app *App) error {
 		if r.Logger != nil {
 			r.Logger.Error("Sync apply failed", "app_id", app.ID, "commit", app.LastSeenCommit, "output", truncateOutput(output))
 		}
-		_ = r.Registry.UpdateStatus(app.ID, "error", nil)
+		now := time.Now()
+		_ = r.Registry.UpdateSyncResult(
+			app.ID,
+			"error",
+			now,
+			app.LastSyncedCommit,
+			app.LastSyncedCommitMessage,
+			output,
+			err.Error(),
+		)
 		return err
 	}
 
 	now := time.Now()
-	if err := r.Registry.UpdateStatus(app.ID, "synced", &now); err != nil && r.Logger != nil {
+	if err := r.Registry.UpdateSyncResult(
+		app.ID,
+		"synced",
+		now,
+		app.LastSeenCommit,
+		app.LastSeenCommitMessage,
+		output,
+		"",
+	); err != nil && r.Logger != nil {
 		r.Logger.Warn("Failed to update app status", "app_id", app.ID, "error", err)
 	}
 	return nil

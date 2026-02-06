@@ -176,7 +176,16 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if _, err := h.Applier.Apply(syncCtx, app.ID, "", nil, app.RepoURL, app.Branch, app.ComposePath, "", deployKey); err != nil {
-		_ = h.Registry.UpdateStatus(app.ID, "error", nil)
+		now := time.Now()
+		_ = h.Registry.UpdateSyncResult(
+			app.ID,
+			"error",
+			now,
+			app.LastSyncedCommit,
+			app.LastSyncedCommitMessage,
+			"",
+			err.Error(),
+		)
 		if h.Logger != nil {
 			h.Logger.Error("Force sync failed", "id", app.ID, "error", err)
 		}
@@ -185,7 +194,15 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	if err := h.Registry.UpdateStatus(app.ID, "synced", &now); err != nil && h.Logger != nil {
+	if err := h.Registry.UpdateSyncResult(
+		app.ID,
+		"synced",
+		now,
+		app.LastSeenCommit,
+		app.LastSeenCommitMessage,
+		"Manual sync completed.",
+		"",
+	); err != nil && h.Logger != nil {
 		h.Logger.Warn("Failed to update sync status after force sync", "id", app.ID, "error", err)
 	}
 

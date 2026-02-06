@@ -20,27 +20,34 @@ type Handler struct {
 
 // AppView is the view model for an app in the list.
 type AppView struct {
-	ID         string
-	Name       string
-	RepoURL    string
-	RepoAuth   string
-	Branch     string
-	Status     string
-	LastSyncAt string
+	ID            string
+	Name          string
+	RepoURL       string
+	RepoAuth      string
+	Branch        string
+	Status        string
+	LastSyncAt    string
+	DesiredCommit string
+	SyncedCommit  string
 }
 
 // AppDetailView is the view model for the app detail page.
 type AppDetailView struct {
-	ID             string
-	Name           string
-	RepoURL        string
-	RepoAuth       string
-	Branch         string
-	ComposePath    string
-	PollInterval   string
-	LastSeenCommit string
-	Status         string
-	LastSyncAt     string
+	ID                      string
+	Name                    string
+	RepoURL                 string
+	RepoAuth                string
+	Branch                  string
+	ComposePath             string
+	PollInterval            string
+	LastSeenCommit          string
+	LastSeenCommitMessage   string
+	LastSyncedCommit        string
+	LastSyncedCommitMessage string
+	LastSyncOutput          string
+	LastSyncError           string
+	Status                  string
+	LastSyncAt              string
 }
 
 // AppFormData is the view model for the new app form.
@@ -213,28 +220,35 @@ func isHTMXRequest(r *http.Request) bool {
 
 func toAppView(app *controller.App) AppView {
 	return AppView{
-		ID:         app.ID,
-		Name:       app.Name,
-		RepoURL:    app.RepoURL,
-		RepoAuth:   fallbackString(app.RepoAuthMethod, "public"),
-		Branch:     app.Branch,
-		Status:     app.Status,
-		LastSyncAt: formatTime(app.LastSyncAt),
+		ID:            app.ID,
+		Name:          app.Name,
+		RepoURL:       app.RepoURL,
+		RepoAuth:      fallbackString(app.RepoAuthMethod, "public"),
+		Branch:        app.Branch,
+		Status:        app.Status,
+		LastSyncAt:    formatTime(app.LastSyncAt),
+		DesiredCommit: formatCommit(app.LastSeenCommit, app.LastSeenCommitMessage),
+		SyncedCommit:  formatCommit(app.LastSyncedCommit, app.LastSyncedCommitMessage),
 	}
 }
 
 func toAppDetailView(app *controller.App) AppDetailView {
 	return AppDetailView{
-		ID:             app.ID,
-		Name:           app.Name,
-		RepoURL:        app.RepoURL,
-		RepoAuth:       fallbackString(app.RepoAuthMethod, "public"),
-		Branch:         app.Branch,
-		ComposePath:    app.ComposePath,
-		PollInterval:   app.PollInterval,
-		LastSeenCommit: fallbackString(app.LastSeenCommit, "n/a"),
-		Status:         app.Status,
-		LastSyncAt:     formatTime(app.LastSyncAt),
+		ID:                      app.ID,
+		Name:                    app.Name,
+		RepoURL:                 app.RepoURL,
+		RepoAuth:                fallbackString(app.RepoAuthMethod, "public"),
+		Branch:                  app.Branch,
+		ComposePath:             app.ComposePath,
+		PollInterval:            app.PollInterval,
+		LastSeenCommit:          fallbackString(app.LastSeenCommit, "n/a"),
+		LastSeenCommitMessage:   fallbackString(app.LastSeenCommitMessage, "n/a"),
+		LastSyncedCommit:        fallbackString(app.LastSyncedCommit, "n/a"),
+		LastSyncedCommitMessage: fallbackString(app.LastSyncedCommitMessage, "n/a"),
+		LastSyncOutput:          strings.TrimSpace(app.LastSyncOutput),
+		LastSyncError:           strings.TrimSpace(app.LastSyncError),
+		Status:                  app.Status,
+		LastSyncAt:              formatTime(app.LastSyncAt),
 	}
 }
 
@@ -250,4 +264,21 @@ func fallbackString(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func formatCommit(hash, message string) string {
+	hash = strings.TrimSpace(hash)
+	message = strings.TrimSpace(message)
+	if hash == "" {
+		return "n/a"
+	}
+
+	short := hash
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	if message == "" {
+		return short
+	}
+	return short + " - " + message
 }

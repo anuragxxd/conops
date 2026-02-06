@@ -1,37 +1,58 @@
 {{define "apps-list"}}
-<table class="main-table">
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Repo</th>
-            <th>Access</th>
-            <th>Branch</th>
-            <th>Status</th>
-            <th>Last Sync</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-        {{range .Apps}}
-        <tr>
-            <td><a href="/ui/apps/{{.ID}}"><strong>{{.Name}}</strong></a></td>
-            <td><a href="{{.RepoURL}}" target="_blank">{{.RepoURL}}</a></td>
-            <td>{{.RepoAuth}}</td>
-            <td>{{.Branch}}</td>
-            <td>{{.Status}}</td>
-            <td>{{.LastSyncAt}}</td>
-            <td>
-                <div role="group">
-                    <a href="/ui/apps/{{.ID}}" role="button" class="secondary">View</a>
-                    <button hx-delete="/api/v1/apps/{{.ID}}" hx-confirm="Are you sure?" hx-target="closest tr" hx-swap="outerHTML" class="contrast">Delete</button>
-                </div>
-            </td>
-        </tr>
-        {{else}}
-        <tr>
-            <td colspan="7">No apps registered.</td>
-        </tr>
-        {{end}}
-    </tbody>
-</table>
+{{if .Apps}}
+<div class="overflow-x-auto">
+    <table class="table table-zebra table-pin-rows">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Repository</th>
+                <th>Access</th>
+                <th>Branch</th>
+                <th>Desired commit</th>
+                <th>Synced commit</th>
+                <th>Status</th>
+                <th>Last sync</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Apps}}
+            <tr>
+                <td><a class="link link-hover font-semibold" href="/ui/apps/{{.ID}}">{{.Name}}</a></td>
+                <td><a class="link link-hover text-base-content/70" href="{{.RepoURL}}" target="_blank">{{.RepoURL}}</a></td>
+                <td><code>{{.RepoAuth}}</code></td>
+                <td><code>{{.Branch}}</code></td>
+                <td class="max-w-56 truncate text-sm text-base-content/70">{{.DesiredCommit}}</td>
+                <td class="max-w-56 truncate text-sm text-base-content/70">{{.SyncedCommit}}</td>
+                <td>
+                    <span class="badge
+                        {{if eq .Status "synced"}}badge-success
+                        {{else if eq .Status "syncing"}}badge-info
+                        {{else if eq .Status "pending"}}badge-warning
+                        {{else if eq .Status "error"}}badge-error
+                        {{else}}badge-neutral{{end}}">
+                        {{.Status}}
+                    </span>
+                </td>
+                <td>{{.LastSyncAt}}</td>
+                <td>
+                    <div class="flex items-center gap-2">
+                        <a href="/ui/apps/{{.ID}}" class="btn btn-ghost btn-xs">View</a>
+                        <button hx-delete="/api/v1/apps/{{.ID}}" hx-confirm="Are you sure?" hx-target="closest tr" hx-swap="outerHTML" class="btn btn-error btn-outline btn-xs">Delete</button>
+                    </div>
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{else}}
+<div class="card bg-base-100 border border-base-300 shadow-sm">
+    <div class="card-body items-center text-center">
+        <h2 class="card-title">No applications yet</h2>
+        <p class="text-base-content/70">Register your first repository to start continuous reconciliation.</p>
+        <a href="/ui/apps/new" class="btn btn-primary">Register first app</a>
+    </div>
+</div>
+{{end}}
 {{end}}

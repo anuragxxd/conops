@@ -154,12 +154,39 @@ func (r *Registry) GetDeployKey(id string) ([]byte, error) {
 
 // UpdateCommit updates the latest commit hash for an app.
 func (r *Registry) UpdateCommit(id, commitHash string) error {
-	return r.store.UpdateAppCommit(context.Background(), id, commitHash)
+	return r.UpdateCommitWithMessage(id, commitHash, "")
+}
+
+// UpdateCommitWithMessage updates latest desired commit hash and subject.
+func (r *Registry) UpdateCommitWithMessage(id, commitHash, commitMessage string) error {
+	return r.store.UpdateAppCommit(context.Background(), id, commitHash, commitMessage)
 }
 
 // UpdateStatus updates app status and optionally the last sync time.
 func (r *Registry) UpdateStatus(id, status string, lastSyncAt *time.Time) error {
 	return r.store.UpdateAppStatus(context.Background(), id, status, lastSyncAt)
+}
+
+// UpdateSyncResult stores sync execution metadata.
+func (r *Registry) UpdateSyncResult(
+	id string,
+	status string,
+	lastSyncAt time.Time,
+	syncedCommit string,
+	syncedCommitMessage string,
+	syncOutput string,
+	syncError string,
+) error {
+	return r.store.UpdateAppSyncResult(
+		context.Background(),
+		id,
+		status,
+		lastSyncAt,
+		syncedCommit,
+		syncedCommitMessage,
+		syncOutput,
+		syncError,
+	)
 }
 
 func zeroBytes(value []byte) {
