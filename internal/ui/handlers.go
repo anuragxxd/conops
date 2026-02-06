@@ -23,6 +23,7 @@ type AppView struct {
 	ID         string
 	Name       string
 	RepoURL    string
+	RepoAuth   string
 	Branch     string
 	Status     string
 	LastSyncAt string
@@ -33,6 +34,7 @@ type AppDetailView struct {
 	ID             string
 	Name           string
 	RepoURL        string
+	RepoAuth       string
 	Branch         string
 	ComposePath    string
 	PollInterval   string
@@ -43,9 +45,10 @@ type AppDetailView struct {
 
 // AppFormData is the view model for the new app form.
 type AppFormData struct {
-	ID          string
 	Name        string
 	RepoURL     string
+	RepoAuth    string
+	DeployKey   string
 	Branch      string
 	ComposePath string
 }
@@ -87,6 +90,7 @@ func (h *Handler) ServeNewAppPage(w http.ResponseWriter, r *http.Request) {
 	data := AppsPageData{
 		Page: "new",
 		Form: AppFormData{
+			RepoAuth:    "public",
 			Branch:      "main",
 			ComposePath: "compose.yaml",
 		},
@@ -145,13 +149,19 @@ func (h *Handler) HandleAddApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	form := AppFormData{
-		ID:          strings.TrimSpace(r.FormValue("id")),
 		Name:        strings.TrimSpace(r.FormValue("name")),
 		RepoURL:     strings.TrimSpace(r.FormValue("repo_url")),
+		RepoAuth:    strings.TrimSpace(r.FormValue("repo_auth_method")),
+		DeployKey:   strings.TrimSpace(r.FormValue("deploy_key")),
 		Branch:      strings.TrimSpace(r.FormValue("branch")),
 		ComposePath: strings.TrimSpace(r.FormValue("compose_path")),
 	}
+	deployKey := form.DeployKey
+	form.DeployKey = ""
 
+	if form.RepoAuth == "" {
+		form.RepoAuth = "public"
+	}
 	if form.Branch == "" {
 		form.Branch = "main"
 	}
@@ -159,20 +169,20 @@ func (h *Handler) HandleAddApp(w http.ResponseWriter, r *http.Request) {
 		form.ComposePath = "compose.yaml"
 	}
 
-	if form.ID == "" || form.Name == "" || form.RepoURL == "" {
-		h.renderNewAppPage(w, http.StatusBadRequest, form, "ID, name, and repo URL are required.")
+	if form.Name == "" || form.RepoURL == "" {
+		h.renderNewAppPage(w, http.StatusBadRequest, form, "Name and repo URL are required.")
 		return
 	}
 
 	app := &controller.App{
-		ID:          form.ID,
-		Name:        form.Name,
-		RepoURL:     form.RepoURL,
-		Branch:      form.Branch,
-		ComposePath: form.ComposePath,
+		Name:           form.Name,
+		RepoURL:        form.RepoURL,
+		RepoAuthMethod: form.RepoAuth,
+		Branch:         form.Branch,
+		ComposePath:    form.ComposePath,
 	}
 
-	if err := h.Registry.Add(app); err != nil {
+	if err := h.Registry.AddWithDeployKey(app, deployKey); err != nil {
 		h.renderNewAppPage(w, http.StatusConflict, form, err.Error())
 		return
 	}
@@ -206,6 +216,7 @@ func toAppView(app *controller.App) AppView {
 		ID:         app.ID,
 		Name:       app.Name,
 		RepoURL:    app.RepoURL,
+		RepoAuth:   fallbackString(app.RepoAuthMethod, "public"),
 		Branch:     app.Branch,
 		Status:     app.Status,
 		LastSyncAt: formatTime(app.LastSyncAt),
@@ -217,6 +228,7 @@ func toAppDetailView(app *controller.App) AppDetailView {
 		ID:             app.ID,
 		Name:           app.Name,
 		RepoURL:        app.RepoURL,
+		RepoAuth:       fallbackString(app.RepoAuthMethod, "public"),
 		Branch:         app.Branch,
 		ComposePath:    app.ComposePath,
 		PollInterval:   app.PollInterval,

@@ -133,10 +133,17 @@ func (r *Reconciler) syncApp(app *App) error {
 		r.Logger.Warn("Failed to mark app syncing", "app_id", app.ID, "error", err)
 	}
 
+	deployKey, err := r.Registry.GetDeployKey(app.ID)
+	if err != nil {
+		_ = r.Registry.UpdateStatus(app.ID, "error", nil)
+		return fmt.Errorf("failed to load app credentials: %w", err)
+	}
+	defer zeroBytes(deployKey)
+
 	ctx, cancel := context.WithTimeout(context.Background(), r.Config.SyncTimeout)
 	defer cancel()
 
-	output, err := r.Executor.Apply(ctx, app.ID, "", nil, app.RepoURL, app.Branch, app.ComposePath, app.LastSeenCommit)
+	output, err := r.Executor.Apply(ctx, app.ID, "", nil, app.RepoURL, app.Branch, app.ComposePath, app.LastSeenCommit, deployKey)
 	if err != nil {
 		if r.Logger != nil {
 			r.Logger.Error("Sync apply failed", "app_id", app.ID, "commit", app.LastSeenCommit, "output", truncateOutput(output))

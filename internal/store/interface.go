@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/conops/conops/internal/api"
 )
+
+var ErrCredentialNotFound = errors.New("app credential not found")
 
 // Store defines the interface for data persistence.
 type Store interface {
@@ -13,7 +16,17 @@ type Store interface {
 	GetApp(ctx context.Context, id string) (*api.App, error)
 	ListApps(ctx context.Context) ([]*api.App, error)
 	DeleteApp(ctx context.Context, id string) error
+	UpsertAppCredential(ctx context.Context, credential *AppCredential) error
+	GetAppCredential(ctx context.Context, id string) (*AppCredential, error)
+	DeleteAppCredential(ctx context.Context, id string) error
 	UpdateAppCommit(ctx context.Context, id, commitHash string) error
 	UpdateAppStatus(ctx context.Context, id, status string, lastSyncAt *time.Time) error
 	Close()
+}
+
+// AppCredential stores encrypted app-level credentials.
+type AppCredential struct {
+	AppID               string
+	DeployKeyCiphertext []byte
+	DeployKeyNonce      []byte
 }

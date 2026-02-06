@@ -1,9 +1,10 @@
 {{define "apps-list"}}
-<table>
+<table class="main-table">
     <thead>
         <tr>
             <th>Name</th>
             <th>Repo</th>
+            <th>Access</th>
             <th>Branch</th>
             <th>Status</th>
             <th>Last Sync</th>
@@ -15,6 +16,7 @@
         <tr>
             <td><a href="/ui/apps/{{.ID}}"><strong>{{.Name}}</strong></a></td>
             <td><a href="{{.RepoURL}}" target="_blank">{{.RepoURL}}</a></td>
+            <td>{{.RepoAuth}}</td>
             <td>{{.Branch}}</td>
             <td>{{.Status}}</td>
             <td>{{.LastSyncAt}}</td>
@@ -27,7 +29,7 @@
         </tr>
         {{else}}
         <tr>
-            <td colspan="6">No apps registered.</td>
+            <td colspan="7">No apps registered.</td>
         </tr>
         {{end}}
     </tbody>

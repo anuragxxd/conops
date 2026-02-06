@@ -2,10 +2,16 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/conops/conops/internal/api"
+	"github.com/conops/conops/internal/credentials"
+	"github.com/conops/conops/internal/repoauth"
 	"github.com/conops/conops/internal/store"
+	"github.com/google/uuid"
 )
 
 // App is aliased to api.App for compatibility, though we should prefer api.App.
@@ -13,21 +19,56 @@ type App = api.App
 
 // Registry manages the lifecycle of tracked applications using a backend store.
 type Registry struct {
-	store store.Store
+	store       store.Store
+	credentials *credentials.Service
 }
 
 // NewRegistry creates a new application registry with the given store backend.
-func NewRegistry(s store.Store) *Registry {
+func NewRegistry(s store.Store, credentialService *credentials.Service) *Registry {
 	return &Registry{
-		store: s,
+		store:       s,
+		credentials: credentialService,
 	}
 }
 
 // Add registers a new application.
 func (r *Registry) Add(app *api.App) error {
+	return r.AddWithDeployKey(app, "")
+}
+
+// AddWithDeployKey registers a new application and stores deploy-key credentials when provided.
+func (r *Registry) AddWithDeployKey(app *api.App, deployKey string) error {
+	if app == nil {
+		return fmt.Errorf("app is required")
+	}
+
+	deployKey = repoauth.NormalizeDeployKey(deployKey)
+	if strings.TrimSpace(app.ID) == "" {
+		app.ID = uuid.NewString()
+	}
+
+	if normalized := repoauth.NormalizeMethod(app.RepoAuthMethod); normalized != "" {
+		app.RepoAuthMethod = normalized
+	} else if deployKey != "" {
+		app.RepoAuthMethod = repoauth.MethodDeployKey
+	} else {
+		app.RepoAuthMethod = repoauth.MethodPublic
+	}
+
+	if err := repoauth.ValidateCreateInput(app.RepoURL, app.RepoAuthMethod, deployKey); err != nil {
+		return err
+	}
+
+	if app.RepoAuthMethod == repoauth.MethodDeployKey && (r.credentials == nil || !r.credentials.Enabled()) {
+		return fmt.Errorf("deploy key support is unavailable: set %s", credentials.EncryptionKeyEnv)
+	}
+
 	// Set defaults if missing
 	if app.Branch == "" {
 		app.Branch = "main"
+	}
+	if app.ComposePath == "" {
+		app.ComposePath = "compose.yaml"
 	}
 	if app.PollInterval == "" {
 		app.PollInterval = "30s"
@@ -35,7 +76,33 @@ func (r *Registry) Add(app *api.App) error {
 	app.Status = "registered"
 	app.LastSyncAt = time.Time{}
 
-	return r.store.CreateApp(context.Background(), app)
+	if err := r.store.CreateApp(context.Background(), app); err != nil {
+		return err
+	}
+
+	if app.RepoAuthMethod != repoauth.MethodDeployKey {
+		return nil
+	}
+
+	plaintext := []byte(deployKey)
+	defer zeroBytes(plaintext)
+
+	ciphertext, nonce, err := r.credentials.Encrypt(plaintext)
+	if err != nil {
+		_ = r.store.DeleteApp(context.Background(), app.ID)
+		return err
+	}
+
+	if err := r.store.UpsertAppCredential(context.Background(), &store.AppCredential{
+		AppID:               app.ID,
+		DeployKeyCiphertext: ciphertext,
+		DeployKeyNonce:      nonce,
+	}); err != nil {
+		_ = r.store.DeleteApp(context.Background(), app.ID)
+		return err
+	}
+
+	return nil
 }
 
 // Get retrieves an application by ID.
@@ -55,7 +122,34 @@ func (r *Registry) List() []*api.App {
 
 // Delete removes an application by ID.
 func (r *Registry) Delete(id string) error {
+	if err := r.store.DeleteAppCredential(context.Background(), id); err != nil {
+		return err
+	}
 	return r.store.DeleteApp(context.Background(), id)
+}
+
+// GetDeployKey returns the decrypted deploy key for the app if configured.
+func (r *Registry) GetDeployKey(id string) ([]byte, error) {
+	credential, err := r.store.GetAppCredential(context.Background(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCredentialNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if r.credentials == nil || !r.credentials.Enabled() {
+		return nil, fmt.Errorf("deploy key support is unavailable: set %s", credentials.EncryptionKeyEnv)
+	}
+
+	deployKey, err := r.credentials.Decrypt(credential.DeployKeyCiphertext, credential.DeployKeyNonce)
+	if err != nil {
+		return nil, err
+	}
+
+	normalized := []byte(repoauth.NormalizeDeployKey(string(deployKey)))
+	zeroBytes(deployKey)
+	return normalized, nil
 }
 
 // UpdateCommit updates the latest commit hash for an app.
@@ -66,4 +160,10 @@ func (r *Registry) UpdateCommit(id, commitHash string) error {
 // UpdateStatus updates app status and optionally the last sync time.
 func (r *Registry) UpdateStatus(id, status string, lastSyncAt *time.Time) error {
 	return r.store.UpdateAppStatus(context.Background(), id, status, lastSyncAt)
+}
+
+func zeroBytes(value []byte) {
+	for i := range value {
+		value[i] = 0
+	}
 }

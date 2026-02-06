@@ -7,6 +7,69 @@
     <title>ConOps Dashboard</title>
     <link rel="icon" type="image/png" href="/ui/static/assets/conops.png">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        :root {
+            --pico-font-size: 87.5%;
+            --pico-line-height: 1.35;
+            --pico-spacing: 0.75rem;
+            --pico-form-element-spacing-vertical: 0.45rem;
+            --pico-form-element-spacing-horizontal: 0.6rem;
+            --pico-nav-element-spacing-vertical: 0.35rem;
+            --pico-nav-element-spacing-horizontal: 0.5rem;
+            --pico-block-spacing-vertical: 1rem;
+            --pico-block-spacing-horizontal: 1rem;
+        }
+
+        main.container {
+            max-width: min(1200px, 95vw);
+        }
+
+        #apps-list .main-table {
+            margin-bottom: 0;
+            table-layout: fixed;
+        }
+
+        #apps-list .main-table thead {
+            border-bottom: 0;
+        }
+
+        #apps-list .main-table th,
+        #apps-list .main-table td {
+            padding: 0.4rem 0.5rem;
+            border-bottom: 0;
+            vertical-align: middle;
+        }
+
+        #apps-list .main-table tbody tr:nth-child(even) {
+            background: transparent;
+        }
+
+        #apps-list .main-table tbody tr:hover {
+            background: var(--pico-muted-border-color);
+        }
+
+        #apps-list .main-table td:nth-child(2) a {
+            display: inline-block;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #apps-list .main-table [role="group"] {
+            margin: 0;
+            gap: 0.35rem;
+            display: flex;
+            flex-wrap: nowrap;
+        }
+
+        #apps-list .main-table [role="group"] a[role="button"],
+        #apps-list .main-table [role="group"] button {
+            margin: 0;
+            padding: 0.25rem 0.55rem;
+            font-size: 0.8rem;
+        }
+    </style>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 </head>
 <body>

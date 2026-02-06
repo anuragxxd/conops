@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/conops/conops/internal/repoauth"
 )
 
 // ComposeExecutor handles Docker Compose operations.
@@ -29,7 +31,7 @@ func NewComposeExecutor(logger *slog.Logger) *ComposeExecutor {
 }
 
 // Apply executes the compose file.
-func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envVars map[string]string, repoURL, branch, composePath, commitHash string) (string, error) {
+func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envVars map[string]string, repoURL, branch, composePath, commitHash string, deployKey []byte) (string, error) {
 	appDir := filepath.Join(e.WorkDir, appID)
 	appDirAbs, err := filepath.Abs(appDir)
 	if err != nil {
@@ -51,7 +53,7 @@ func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envV
 
 	repoDir := filepath.Join(appDirAbs, "repo")
 	e.Logger.Info("Preparing repo", "app_id", appID, "repo", repoURL, "branch", branch, "commit", commitHash, "dir", repoDir)
-	if err := e.prepareRepo(ctx, appDirAbs, repoDir, repoURL, branch, commitHash); err != nil {
+	if err := e.prepareRepo(ctx, appDirAbs, repoDir, repoURL, branch, commitHash, deployKey); err != nil {
 		return "", fmt.Errorf("prepare repo failed: %w", err)
 	}
 
@@ -166,7 +168,13 @@ func (e *ComposeExecutor) Destroy(ctx context.Context, appID, composePath string
 	return strings.Join(outputs, "\n"), nil
 }
 
-func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repoURL, branch, commitHash string) error {
+func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repoURL, branch, commitHash string, deployKey []byte) error {
+	gitEnv, cleanup, err := e.buildGitEnv(appDir, deployKey)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	gitDir := filepath.Join(repoDir, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
 		cloneArgs := []string{"clone", "--branch", branch}
@@ -174,44 +182,75 @@ func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repo
 			cloneArgs = append(cloneArgs, "--depth", "1")
 		}
 		cloneArgs = append(cloneArgs, repoURL, repoDir)
-		_, err := e.runCommand(ctx, "git", cloneArgs, appDir, nil)
+		_, err := e.runCommand(ctx, "git", cloneArgs, appDir, gitEnv)
 		if err != nil {
 			return err
 		}
 		if commitHash != "" {
-			if _, err := e.runCommand(ctx, "git", []string{"checkout", commitHash}, repoDir, nil); err != nil {
+			if _, err := e.runCommand(ctx, "git", []string{"checkout", commitHash}, repoDir, gitEnv); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	if _, err := e.runCommand(ctx, "git", []string{"fetch", "origin"}, repoDir, nil); err != nil {
+	if _, err := e.runCommand(ctx, "git", []string{"fetch", "origin"}, repoDir, gitEnv); err != nil {
 		return err
 	}
 
 	if commitHash != "" {
-		if _, err := e.runCommand(ctx, "git", []string{"fetch", "origin", commitHash}, repoDir, nil); err != nil {
+		if _, err := e.runCommand(ctx, "git", []string{"fetch", "origin", commitHash}, repoDir, gitEnv); err != nil {
 			return err
 		}
-		if _, err := e.runCommand(ctx, "git", []string{"checkout", commitHash}, repoDir, nil); err != nil {
+		if _, err := e.runCommand(ctx, "git", []string{"checkout", commitHash}, repoDir, gitEnv); err != nil {
 			return err
 		}
-		if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", commitHash}, repoDir, nil); err != nil {
+		if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", commitHash}, repoDir, gitEnv); err != nil {
 			return err
 		}
 	} else {
-		if _, err := e.runCommand(ctx, "git", []string{"checkout", branch}, repoDir, nil); err != nil {
+		if _, err := e.runCommand(ctx, "git", []string{"checkout", branch}, repoDir, gitEnv); err != nil {
 			return err
 		}
-		if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", "origin/" + branch}, repoDir, nil); err != nil {
+		if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", "origin/" + branch}, repoDir, gitEnv); err != nil {
 			return err
 		}
 	}
-	if _, err := e.runCommand(ctx, "git", []string{"clean", "-fd"}, repoDir, nil); err != nil {
+	if _, err := e.runCommand(ctx, "git", []string{"clean", "-fd"}, repoDir, gitEnv); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (e *ComposeExecutor) buildGitEnv(appDir string, deployKey []byte) (map[string]string, func(), error) {
+	if len(deployKey) == 0 {
+		return nil, func() {}, nil
+	}
+
+	knownHostsPath, err := repoauth.ResolveKnownHostsPath()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sshDir := filepath.Join(appDir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return nil, nil, fmt.Errorf("failed to create ssh dir: %w", err)
+	}
+
+	keyPath := filepath.Join(sshDir, "deploy_key")
+	if err := os.WriteFile(keyPath, deployKey, 0600); err != nil {
+		return nil, nil, fmt.Errorf("failed to write deploy key file: %w", err)
+	}
+
+	cleanup := func() {
+		_ = os.Remove(keyPath)
+	}
+
+	env := map[string]string{
+		"GIT_TERMINAL_PROMPT": "0",
+		"GIT_SSH_COMMAND":     repoauth.BuildSSHCommand(keyPath, knownHostsPath),
+	}
+	return env, cleanup, nil
 }
 
 func (e *ComposeExecutor) runCommand(ctx context.Context, cmd string, args []string, workDir string, env map[string]string) (string, error) {

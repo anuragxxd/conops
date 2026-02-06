@@ -18,14 +18,21 @@
     <p><mark>{{.Error}}</mark></p>
     {{end}}
     <form method="post" action="/ui/apps">
-        <label for="id">App ID</label>
-        <input type="text" id="id" name="id" value="{{.Form.ID}}" required placeholder="e.g., my-app">
-
         <label for="name">App Name</label>
         <input type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="e.g., My Application">
 
         <label for="repo_url">Git Repository URL</label>
-        <input type="url" id="repo_url" name="repo_url" value="{{.Form.RepoURL}}" required placeholder="https://github.com/user/repo.git">
+        <input type="text" id="repo_url" name="repo_url" value="{{.Form.RepoURL}}" required placeholder="git@github.com:user/repo.git or https://github.com/user/repo.git">
+
+        <label for="repo_auth_method">Repository Access</label>
+        <select id="repo_auth_method" name="repo_auth_method">
+            <option value="public" {{if eq .Form.RepoAuth "public"}}selected{{end}}>Public repository</option>
+            <option value="deploy_key" {{if eq .Form.RepoAuth "deploy_key"}}selected{{end}}>Private GitHub (deploy key)</option>
+        </select>
+
+        <label for="deploy_key">Deploy Private Key</label>
+        <textarea id="deploy_key" name="deploy_key" rows="8" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">{{.Form.DeployKey}}</textarea>
+        <small>Required only when using private GitHub deploy keys.</small>
 
         <label for="branch">Branch</label>
         <input type="text" id="branch" name="branch" value="{{.Form.Branch}}">
@@ -59,7 +66,10 @@
                 <tr><th scope="row">Last Sync</th><td>{{.App.LastSyncAt}}</td></tr>
             </tbody>
         </table>
-        <button hx-delete="/api/v1/apps/{{.App.ID}}" hx-confirm="Delete this app?" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location='/ui/apps';}" class="contrast">Delete App</button>
+        <div role="group">
+            <button hx-post="/api/v1/apps/{{.App.ID}}/sync" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location.reload();}">Force Sync</button>
+            <button hx-delete="/api/v1/apps/{{.App.ID}}" hx-confirm="Delete this app?" hx-target="body" hx-swap="none" hx-on::after-request="if(event.detail.successful){window.location='/ui/apps';}" class="contrast">Delete App</button>
+        </div>
     </article>
 </section>
 {{end}}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/conops/conops/internal/compose"
 	"github.com/conops/conops/internal/controller"
+	"github.com/conops/conops/internal/credentials"
 	"github.com/conops/conops/internal/store"
 	"github.com/conops/conops/internal/ui"
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,12 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	dataDir := "/data"
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		// Fallback for local development if /data doesn't exist
+		dataDir = "."
+	}
 
 	var dbStore store.Store
 	var err error
@@ -36,12 +43,6 @@ func main() {
 		logger.Info("Using PostgreSQL store")
 	} else {
 		// Default to SQLite
-		// Ensure data directory exists
-		dataDir := "/data"
-		if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-			// Fallback for local development if /data doesn't exist
-			dataDir = "."
-		}
 		dbPath := filepath.Join(dataDir, "conops.db")
 
 		dbStore, err = store.NewSQLiteStore(dbPath)
@@ -53,7 +54,14 @@ func main() {
 	}
 	defer dbStore.Close()
 
-	registry := controller.NewRegistry(dbStore)
+	credentialService, err := credentials.NewServiceFromEnv(filepath.Join(dataDir, "conops-encryption.key"))
+	if err != nil {
+		logger.Error("Failed to initialize credential encryption", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("Credential encryption is enabled", "source", credentialService.KeySource())
+
+	registry := controller.NewRegistry(dbStore, credentialService)
 
 	// Start Git Watcher
 	watcher := controller.NewGitWatcher(registry, logger)
@@ -75,7 +83,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	appHandler := controller.NewHandler(registry, executor, logger)
+	appHandler := controller.NewHandler(registry, executor, executor, logger)
 	uiHandler, err := ui.NewHandler(registry, "web/templates")
 	if err != nil {
 		logger.Error("Failed to initialize UI handler", "error", err)
@@ -103,6 +111,7 @@ func main() {
 			r.Post("/", appHandler.RegisterApp)
 			r.Get("/", appHandler.ListApps)
 			r.Get("/{id}", appHandler.GetApp)
+			r.Post("/{id}/sync", appHandler.ForceSyncApp)
 			r.Delete("/{id}", appHandler.DeleteApp)
 		})
 	})

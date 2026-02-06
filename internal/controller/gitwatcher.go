@@ -8,9 +8,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/conops/conops/internal/repoauth"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 )
 
 // GitWatcher monitors registered apps for changes.
@@ -99,8 +102,12 @@ func (w *GitWatcher) checkRepo(app *App) error {
 	repoPath := filepath.Join(w.CacheDir, app.ID)
 	w.Logger.Debug("Checking repo state", "id", app.ID, "path", repoPath)
 
+	auth, err := w.authForApp(app)
+	if err != nil {
+		return err
+	}
+
 	var repo *git.Repository
-	var err error
 
 	// Clone if not exists, otherwise open
 	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
@@ -108,6 +115,7 @@ func (w *GitWatcher) checkRepo(app *App) error {
 		repo, err = git.PlainClone(repoPath, false, &git.CloneOptions{
 			URL:      app.RepoURL,
 			Progress: nil,
+			Auth:     auth,
 		})
 	} else {
 		w.Logger.Debug("Opening repo", "id", app.ID, "path", repoPath)
@@ -131,6 +139,7 @@ func (w *GitWatcher) checkRepo(app *App) error {
 		RemoteName: "origin",
 		Progress:   nil,
 		RefSpecs:   []config.RefSpec{"+refs/heads/*:refs/remotes/origin/*"},
+		Auth:       auth,
 	})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
 		return fmt.Errorf("fetch error: %w", err)
@@ -178,4 +187,37 @@ func (w *GitWatcher) checkRepo(app *App) error {
 	w.Logger.Debug("Registry updated", "id", app.ID, "commit", commitHash)
 
 	return nil
+}
+
+func (w *GitWatcher) authForApp(app *App) (transport.AuthMethod, error) {
+	if app.RepoAuthMethod != repoauth.MethodDeployKey {
+		return nil, nil
+	}
+
+	deployKey, err := w.Registry.GetDeployKey(app.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load deploy key: %w", err)
+	}
+	if len(deployKey) == 0 {
+		return nil, fmt.Errorf("missing deploy key for app")
+	}
+	defer zeroBytes(deployKey)
+
+	knownHostsPath, err := repoauth.ResolveKnownHostsPath()
+	if err != nil {
+		return nil, err
+	}
+	callback, err := repoauth.NewHostKeyCallback(knownHostsPath)
+	if err != nil {
+		return nil, err
+	}
+
+	auth, err := gitssh.NewPublicKeys("git", deployKey, "")
+	if err != nil {
+		return nil, fmt.Errorf("invalid deploy key: %w", err)
+	}
+	auth.HostKeyCallbackHelper = gitssh.HostKeyCallbackHelper{
+		HostKeyCallback: callback,
+	}
+	return auth, nil
 }

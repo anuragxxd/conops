@@ -8,6 +8,7 @@ type App struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
 	RepoURL        string    `json:"repo_url"`
+	RepoAuthMethod string    `json:"repo_auth_method"`
 	Branch         string    `json:"branch"`
 	ComposePath    string    `json:"compose_path"`
 	PollInterval   string    `json:"poll_interval"` // Duration string e.g. "30s"
