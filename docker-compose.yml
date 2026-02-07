@@ -12,13 +12,12 @@ services:
       - CONOPS_RECONCILE_INTERVAL=10s
       - CONOPS_SYNC_TIMEOUT=5m
     volumes:
-      # Map templates/static if you want to edit them without rebuilding.
-      # Runtime cache directories live inside /app (.conops-cache and .conops-runtime).
       - ./web:/app/web
       - conops_data:/data
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:15-alpine
@@ -30,6 +29,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conops -d conops"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
 
 volumes:
   conops_data:

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/conops/conops/internal/compose"
 	"github.com/conops/conops/internal/controller"
 	"github.com/go-chi/chi/v5"
 )
@@ -15,20 +17,32 @@ import (
 // Handler manages UI requests.
 type Handler struct {
 	Registry *controller.Registry
+	Executor *compose.ComposeExecutor
 	Tmpl     *template.Template
+}
+
+// ServiceView is the view model for a container in the detail page.
+type ServiceView struct {
+	Service string
+	Image   string
+	Status  string // "running" or "exited"
+	Health  string // "healthy", "unhealthy", "starting", or ""
+	Ports   string
 }
 
 // AppView is the view model for an app in the list.
 type AppView struct {
-	ID            string
-	Name          string
-	RepoURL       string
-	RepoAuth      string
-	Branch        string
-	Status        string
-	LastSyncAt    string
-	DesiredCommit string
-	SyncedCommit  string
+	ID                  string
+	Name                string
+	RepoURL             string
+	RepoShort           string // e.g. "org/repo" extracted from full URL
+	Branch              string
+	Status              string
+	LastSyncAt          string
+	LastSyncAtRelative  string
+	SyncedCommitShort   string
+	SyncedCommitMessage string
+	InSync              bool
 }
 
 // AppDetailView is the view model for the app detail page.
@@ -42,12 +56,22 @@ type AppDetailView struct {
 	PollInterval            string
 	LastSeenCommit          string
 	LastSeenCommitMessage   string
+	LastSeenCommitShort     string
 	LastSyncedCommit        string
 	LastSyncedCommitMessage string
+	LastSyncedCommitShort   string
 	LastSyncOutput          string
 	LastSyncError           string
 	Status                  string
 	LastSyncAt              string
+	LastSyncAtRelative      string
+
+	// Runtime container information
+	Services       []ServiceView
+	ContainerCount int
+	RunningCount   int
+	HealthLabel    string // "Healthy", "Degraded", "Down", "No data"
+	InSync         bool   // true when desired commit == synced commit
 }
 
 // AppFormData is the view model for the new app form.
@@ -70,7 +94,7 @@ type AppsPageData struct {
 }
 
 // NewHandler creates a new UI handler.
-func NewHandler(registry *controller.Registry, templateDir string) (*Handler, error) {
+func NewHandler(registry *controller.Registry, executor *compose.ComposeExecutor, templateDir string) (*Handler, error) {
 	tmpl, err := template.ParseGlob(filepath.Join(templateDir, "*.html"))
 	if err != nil {
 		return nil, err
@@ -78,6 +102,7 @@ func NewHandler(registry *controller.Registry, templateDir string) (*Handler, er
 
 	return &Handler{
 		Registry: registry,
+		Executor: executor,
 		Tmpl:     tmpl,
 	}, nil
 }
@@ -116,9 +141,20 @@ func (h *Handler) ServeAppDetailPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	detail := toAppDetailView(app)
+
+	// Fetch runtime container information if executor is available.
+	if h.Executor != nil {
+		projectName := compose.ProjectNameForApp(app.ID)
+		containers, inspectErr := h.Executor.InspectProjectContainers(r.Context(), projectName)
+		if inspectErr == nil {
+			enrichWithContainerData(&detail, containers)
+		}
+	}
+
 	data := AppsPageData{
 		Page: "detail",
-		App:  toAppDetailView(app),
+		App:  detail,
 	}
 	if err := h.Tmpl.ExecuteTemplate(w, "base", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -218,21 +254,53 @@ func isHTMXRequest(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get("HX-Request"), "true")
 }
 
+// enrichWithContainerData populates container-related fields on the detail view.
+func enrichWithContainerData(detail *AppDetailView, containers []compose.ServiceContainer) {
+	detail.ContainerCount = len(containers)
+	unhealthyCount := 0
+	for _, c := range containers {
+		if c.Status == "running" {
+			detail.RunningCount++
+		}
+		if c.Health == "unhealthy" {
+			unhealthyCount++
+		}
+		detail.Services = append(detail.Services, ServiceView{
+			Service: c.Service,
+			Image:   c.Image,
+			Status:  c.Status,
+			Health:  c.Health,
+			Ports:   c.Ports,
+		})
+	}
+	detail.HealthLabel = healthLabel(detail.ContainerCount, detail.RunningCount, unhealthyCount)
+}
+
 func toAppView(app *controller.App) AppView {
+	desired := strings.TrimSpace(app.LastSeenCommit)
+	synced := strings.TrimSpace(app.LastSyncedCommit)
+	inSync := desired != "" && synced != "" && desired == synced
+
 	return AppView{
-		ID:            app.ID,
-		Name:          app.Name,
-		RepoURL:       app.RepoURL,
-		RepoAuth:      fallbackString(app.RepoAuthMethod, "public"),
-		Branch:        app.Branch,
-		Status:        app.Status,
-		LastSyncAt:    formatTime(app.LastSyncAt),
-		DesiredCommit: formatCommit(app.LastSeenCommit, app.LastSeenCommitMessage),
-		SyncedCommit:  formatCommit(app.LastSyncedCommit, app.LastSyncedCommitMessage),
+		ID:                  app.ID,
+		Name:                app.Name,
+		RepoURL:             app.RepoURL,
+		RepoShort:           shortRepoURL(app.RepoURL),
+		Branch:              app.Branch,
+		Status:              app.Status,
+		LastSyncAt:          formatTime(app.LastSyncAt),
+		LastSyncAtRelative:  relativeTime(app.LastSyncAt),
+		SyncedCommitShort:   shortHash(app.LastSyncedCommit),
+		SyncedCommitMessage: fallbackString(app.LastSyncedCommitMessage, ""),
+		InSync:              inSync,
 	}
 }
 
 func toAppDetailView(app *controller.App) AppDetailView {
+	desired := strings.TrimSpace(app.LastSeenCommit)
+	synced := strings.TrimSpace(app.LastSyncedCommit)
+	inSync := desired != "" && synced != "" && desired == synced
+
 	return AppDetailView{
 		ID:                      app.ID,
 		Name:                    app.Name,
@@ -243,12 +311,17 @@ func toAppDetailView(app *controller.App) AppDetailView {
 		PollInterval:            app.PollInterval,
 		LastSeenCommit:          fallbackString(app.LastSeenCommit, "n/a"),
 		LastSeenCommitMessage:   fallbackString(app.LastSeenCommitMessage, "n/a"),
+		LastSeenCommitShort:     shortHash(app.LastSeenCommit),
 		LastSyncedCommit:        fallbackString(app.LastSyncedCommit, "n/a"),
 		LastSyncedCommitMessage: fallbackString(app.LastSyncedCommitMessage, "n/a"),
+		LastSyncedCommitShort:   shortHash(app.LastSyncedCommit),
 		LastSyncOutput:          strings.TrimSpace(app.LastSyncOutput),
 		LastSyncError:           strings.TrimSpace(app.LastSyncError),
 		Status:                  app.Status,
 		LastSyncAt:              formatTime(app.LastSyncAt),
+		LastSyncAtRelative:      relativeTime(app.LastSyncAt),
+		InSync:                  inSync,
+		HealthLabel:             "No data",
 	}
 }
 
@@ -257,6 +330,79 @@ func formatTime(value time.Time) string {
 		return "n/a"
 	}
 	return value.Format(time.RFC3339)
+}
+
+func relativeTime(value time.Time) string {
+	if value.IsZero() {
+		return "never"
+	}
+	d := time.Since(value)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		mins := int(d.Minutes())
+		if mins == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", mins)
+	case d < 24*time.Hour:
+		hours := int(d.Hours())
+		if hours == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", hours)
+	default:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1 day ago"
+		}
+		return fmt.Sprintf("%d days ago", days)
+	}
+}
+
+func shortHash(hash string) string {
+	hash = strings.TrimSpace(hash)
+	if hash == "" {
+		return "n/a"
+	}
+	if len(hash) > 8 {
+		return hash[:8]
+	}
+	return hash
+}
+
+func healthLabel(containerCount, runningCount, unhealthyCount int) string {
+	if containerCount == 0 {
+		return "No data"
+	}
+	if runningCount == containerCount && unhealthyCount == 0 {
+		return "Healthy"
+	}
+	if runningCount == 0 {
+		return "Down"
+	}
+	return "Degraded"
+}
+
+func shortRepoURL(repoURL string) string {
+	u := strings.TrimSpace(repoURL)
+	u = strings.TrimSuffix(u, ".git")
+
+	// SSH format: git@github.com:org/repo
+	if strings.HasPrefix(u, "git@") {
+		if idx := strings.Index(u, ":"); idx > 0 && idx < len(u)-1 {
+			return u[idx+1:]
+		}
+	}
+
+	// HTTPS format: https://github.com/org/repo
+	parts := strings.Split(u, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+	}
+
+	return repoURL
 }
 
 func fallbackString(value, fallback string) string {

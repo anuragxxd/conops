@@ -482,6 +482,83 @@ func composeProjectName(appID string) string {
 	return project
 }
 
+// ServiceContainer represents runtime details for one container in a compose project.
+type ServiceContainer struct {
+	Service string
+	Name    string
+	Image   string
+	Status  string // "running" or "exited"
+	Health  string // "healthy", "unhealthy", "starting", or "" (no healthcheck)
+	Ports   string
+}
+
+// InspectProjectContainers returns detailed container information for a compose project.
+func (e *ComposeExecutor) InspectProjectContainers(ctx context.Context, projectName string) ([]ServiceContainer, error) {
+	if strings.TrimSpace(projectName) == "" {
+		return nil, nil
+	}
+
+	output, err := e.runCommand(
+		ctx,
+		"docker",
+		[]string{
+			"ps", "-a",
+			"--filter", fmt.Sprintf("label=com.docker.compose.project=%s", projectName),
+			"--filter", "label=com.docker.compose.oneoff=False",
+			"--format", `{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.Names}}`,
+		},
+		e.runtimeWorkDir(),
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("docker ps failed: %w", err)
+	}
+
+	var containers []ServiceContainer
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 5)
+		if len(parts) != 5 {
+			continue
+		}
+
+		rawStatus := strings.TrimSpace(parts[2])
+		health := ""
+		lowerStatus := strings.ToLower(rawStatus)
+		if strings.Contains(lowerStatus, "(healthy)") {
+			health = "healthy"
+		} else if strings.Contains(lowerStatus, "(unhealthy)") {
+			health = "unhealthy"
+		} else if strings.Contains(lowerStatus, "(health: starting)") {
+			health = "starting"
+		}
+
+		state := "exited"
+		if dockerStatusIsRunning(rawStatus) {
+			state = "running"
+		}
+
+		containers = append(containers, ServiceContainer{
+			Service: strings.TrimSpace(parts[0]),
+			Image:   strings.TrimSpace(parts[1]),
+			Status:  state,
+			Health:  health,
+			Ports:   strings.TrimSpace(parts[3]),
+			Name:    strings.TrimSpace(parts[4]),
+		})
+	}
+
+	slices.SortFunc(containers, func(a, b ServiceContainer) int {
+		return strings.Compare(a.Service, b.Service)
+	})
+
+	return containers, nil
+}
+
 // ProjectNameForApp returns the deterministic compose project name for an app ID.
 func ProjectNameForApp(appID string) string {
 	return composeProjectName(appID)
