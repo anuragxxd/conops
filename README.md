@@ -1,4 +1,8 @@
-<h1 align="center">ConOps</h1>
+<h1 align="center">
+  <img src="docs/media/conops.png" alt="ConOps Logo" width="200">
+  <br>
+  ConOps
+</h1>
 
 <p align="center">
   <strong>GitOps for Docker Compose. Like Argo CD, but without Kubernetes.</strong>
