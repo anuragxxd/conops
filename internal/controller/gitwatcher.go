@@ -40,6 +40,34 @@ func (w *GitWatcher) Start(ctx context.Context) {
 
 	// Track running pollers to avoid duplicates
 	pollers := make(map[string]context.CancelFunc)
+	syncPollers := func() {
+		apps := w.Registry.List()
+		w.Logger.Debug("Registry poll tick", "app_count", len(apps))
+		activeIDs := make(map[string]bool)
+
+		for _, app := range apps {
+			activeIDs[app.ID] = true
+			if _, running := pollers[app.ID]; !running {
+				// Start a new poller for this app
+				pollCtx, cancel := context.WithCancel(ctx)
+				pollers[app.ID] = cancel
+				w.Logger.Info("Starting app poller", "id", app.ID, "interval", app.PollInterval)
+				go w.pollApp(pollCtx, app)
+			}
+		}
+
+		// Cleanup stopped apps
+		for id, cancel := range pollers {
+			if !activeIDs[id] {
+				cancel()
+				delete(pollers, id)
+				w.Logger.Info("Stopped app poller", "id", id)
+			}
+		}
+	}
+
+	// Prime pollers immediately instead of waiting for the first ticker interval.
+	syncPollers()
 
 	for {
 		select {
@@ -47,29 +75,7 @@ func (w *GitWatcher) Start(ctx context.Context) {
 			w.Logger.Info("Git watcher stopped")
 			return
 		case <-ticker.C:
-			apps := w.Registry.List()
-			w.Logger.Debug("Registry poll tick", "app_count", len(apps))
-			activeIDs := make(map[string]bool)
-
-			for _, app := range apps {
-				activeIDs[app.ID] = true
-				if _, running := pollers[app.ID]; !running {
-					// Start a new poller for this app
-					pollCtx, cancel := context.WithCancel(ctx)
-					pollers[app.ID] = cancel
-					w.Logger.Info("Starting app poller", "id", app.ID, "interval", app.PollInterval)
-					go w.pollApp(pollCtx, app)
-				}
-			}
-
-			// Cleanup stopped apps
-			for id, cancel := range pollers {
-				if !activeIDs[id] {
-					cancel()
-					delete(pollers, id)
-					w.Logger.Info("Stopped app poller", "id", id)
-				}
-			}
+			syncPollers()
 		}
 	}
 }
@@ -85,6 +91,11 @@ func (w *GitWatcher) pollApp(ctx context.Context, app *App) {
 	defer ticker.Stop()
 
 	w.Logger.Info("Started polling app", "id", app.ID, "repo", app.RepoURL)
+
+	// Run the first check immediately for new apps.
+	if err := w.checkRepo(app); err != nil {
+		w.Logger.Error("Failed initial repo check", "id", app.ID, "error", err)
+	}
 
 	for {
 		select {

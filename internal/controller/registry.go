@@ -73,7 +73,8 @@ func (r *Registry) AddWithDeployKey(app *api.App, deployKey string) error {
 	if app.PollInterval == "" {
 		app.PollInterval = "30s"
 	}
-	app.Status = "registered"
+	// New apps should enter the reconciliation pipeline immediately.
+	app.Status = "pending"
 	app.LastSyncAt = time.Time{}
 
 	if err := r.store.CreateApp(context.Background(), app); err != nil {
@@ -187,6 +188,11 @@ func (r *Registry) UpdateSyncResult(
 		syncOutput,
 		syncError,
 	)
+}
+
+// UpdateSyncProgress stores in-flight sync logs while status is syncing.
+func (r *Registry) UpdateSyncProgress(id string, lastSyncAt time.Time, syncOutput string) error {
+	return r.store.UpdateAppSyncProgress(context.Background(), id, lastSyncAt, syncOutput)
 }
 
 func zeroBytes(value []byte) {

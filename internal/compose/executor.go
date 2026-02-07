@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -47,51 +49,110 @@ func NewComposeExecutor(logger *slog.Logger) *ComposeExecutor {
 }
 
 // Apply executes the compose file.
-func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envVars map[string]string, repoURL, branch, composePath, commitHash string, deployKey []byte) (string, error) {
+func (e *ComposeExecutor) Apply(
+	ctx context.Context,
+	appID, content string,
+	envVars map[string]string,
+	repoURL, branch, composePath, commitHash string,
+	deployKey []byte,
+	onProgress func(string),
+) (string, error) {
+	var syncLog strings.Builder
+	emitProgress := func() {
+		if onProgress != nil {
+			onProgress(strings.TrimSpace(syncLog.String()))
+		}
+	}
+
 	appDir := filepath.Join(e.WorkDir, appID)
 	appDirAbs, err := filepath.Abs(appDir)
 	if err != nil {
-		return "", fmt.Errorf("resolve app dir failed: %w", err)
+		appendLogSection(&syncLog, "Sync setup")
+		appendLogLine(&syncLog, "failed to resolve runtime directory")
+		appendLogLine(&syncLog, err.Error())
+		emitProgress()
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("resolve app dir failed: %w", err)
 	}
 	if err := os.MkdirAll(appDirAbs, 0755); err != nil {
-		return "", fmt.Errorf("failed to create app dir: %w", err)
+		appendLogSection(&syncLog, "Sync setup")
+		appendLogLine(&syncLog, "failed to create runtime directory")
+		appendLogLine(&syncLog, err.Error())
+		emitProgress()
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("failed to create app dir: %w", err)
 	}
 
 	if strings.TrimSpace(repoURL) == "" {
-		return "", fmt.Errorf("repo url is empty")
+		appendLogSection(&syncLog, "Validation")
+		appendLogLine(&syncLog, "repo url is empty")
+		emitProgress()
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("repo url is empty")
 	}
 	if strings.TrimSpace(composePath) == "" {
-		return "", fmt.Errorf("compose path is empty")
+		appendLogSection(&syncLog, "Validation")
+		appendLogLine(&syncLog, "compose path is empty")
+		emitProgress()
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("compose path is empty")
 	}
 	if strings.TrimSpace(branch) == "" {
 		branch = "main"
 	}
 
+	appendLogSection(&syncLog, "Sync started")
+	appendLogLine(&syncLog, fmt.Sprintf("app_id: %s", appID))
+	appendLogLine(&syncLog, fmt.Sprintf("repository: %s", repoURL))
+	appendLogLine(&syncLog, fmt.Sprintf("branch: %s", branch))
+	if strings.TrimSpace(commitHash) != "" {
+		appendLogLine(&syncLog, fmt.Sprintf("target_commit: %s", commitHash))
+	} else {
+		appendLogLine(&syncLog, "target_commit: latest on branch")
+	}
+	emitProgress()
+
 	repoDir := filepath.Join(appDirAbs, "repo")
 	e.Logger.Info("Preparing repo", "app_id", appID, "repo", repoURL, "branch", branch, "commit", commitHash, "dir", repoDir)
-	if err := e.prepareRepo(ctx, appDirAbs, repoDir, repoURL, branch, commitHash, deployKey); err != nil {
-		return "", fmt.Errorf("prepare repo failed: %w", err)
+	repoLog, err := e.prepareRepo(ctx, appDirAbs, repoDir, repoURL, branch, commitHash, deployKey)
+	appendLogBlock(&syncLog, repoLog)
+	emitProgress()
+	if err != nil {
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("prepare repo failed: %w", err)
 	}
 
 	composeFullPath := filepath.Join(repoDir, composePath)
 	composeDir := filepath.Dir(composeFullPath)
 	if _, err := os.Stat(composeDir); err != nil {
-		return "", fmt.Errorf("compose dir not found: %w", err)
+		appendLogSection(&syncLog, "Compose file")
+		appendLogLine(&syncLog, fmt.Sprintf("compose directory does not exist: %s", composeDir))
+		appendLogLine(&syncLog, err.Error())
+		emitProgress()
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("compose dir not found: %w", err)
 	}
 
 	wroteCompose := false
 	if strings.TrimSpace(content) != "" {
 		if err := os.WriteFile(composeFullPath, []byte(content), 0644); err != nil {
-			return "", fmt.Errorf("failed to write compose file: %w", err)
+			appendLogSection(&syncLog, "Compose file")
+			appendLogLine(&syncLog, fmt.Sprintf("failed to write compose file: %s", composeFullPath))
+			appendLogLine(&syncLog, err.Error())
+			emitProgress()
+			return strings.TrimSpace(syncLog.String()), fmt.Errorf("failed to write compose file: %w", err)
 		}
 		wroteCompose = true
 	} else {
 		if _, err := os.Stat(composeFullPath); err != nil {
-			return "", fmt.Errorf("compose file not found: %w", err)
+			appendLogSection(&syncLog, "Compose file")
+			appendLogLine(&syncLog, fmt.Sprintf("compose file not found: %s", composeFullPath))
+			appendLogLine(&syncLog, err.Error())
+			emitProgress()
+			return strings.TrimSpace(syncLog.String()), fmt.Errorf("compose file not found: %w", err)
 		}
 	}
 	composeFileName := filepath.Base(composeFullPath)
 	projectName := composeProjectName(appID)
+
+	appendLogSection(&syncLog, "Compose file")
+	appendLogLine(&syncLog, fmt.Sprintf("path: %s", composeFullPath))
+	appendLogLine(&syncLog, fmt.Sprintf("written_from_request: %t", wroteCompose))
+	emitProgress()
 
 	e.Logger.Info(
 		"Compose file ready",
@@ -102,20 +163,42 @@ func (e *ComposeExecutor) Apply(ctx context.Context, appID, content string, envV
 	)
 
 	// Pull images
+	appendLogSection(&syncLog, "Docker image pull")
 	e.Logger.Info("Pulling images", "app_id", appID)
-	pullOut, err := e.runCommand(ctx, "docker", []string{"compose", "-p", projectName, "-f", composeFileName, "pull"}, composeDir, envVars)
+	_, err = e.runCommandWithTranscript(
+		ctx,
+		&syncLog,
+		"docker",
+		[]string{"compose", "-p", projectName, "-f", composeFileName, "pull"},
+		composeDir,
+		envVars,
+		onProgress,
+	)
 	if err != nil {
-		return string(pullOut), fmt.Errorf("pull failed: %w", err)
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("pull failed: %w", err)
 	}
 
 	// Up detached
+	appendLogSection(&syncLog, "Compose apply")
+	appendLogLine(&syncLog, "build output appears below when services require a build")
 	e.Logger.Info("Applying configuration", "app_id", appID)
-	upOut, err := e.runCommand(ctx, "docker", []string{"compose", "-p", projectName, "-f", composeFileName, "up", "-d", "--remove-orphans"}, composeDir, envVars)
+	_, err = e.runCommandWithTranscript(
+		ctx,
+		&syncLog,
+		"docker",
+		[]string{"compose", "-p", projectName, "-f", composeFileName, "up", "-d", "--remove-orphans"},
+		composeDir,
+		envVars,
+		onProgress,
+	)
 	if err != nil {
-		return string(pullOut) + "\n" + string(upOut), fmt.Errorf("up failed: %w", err)
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("up failed: %w", err)
 	}
 
-	return string(pullOut) + "\n" + string(upOut), nil
+	appendLogSection(&syncLog, "Sync completed")
+	appendLogLine(&syncLog, "application reconciled successfully")
+	emitProgress()
+	return strings.TrimSpace(syncLog.String()), nil
 }
 
 // Destroy tears down app containers and networks without removing volumes.
@@ -146,6 +229,7 @@ func (e *ComposeExecutor) Destroy(ctx context.Context, appID, composePath string
 			[]string{"compose", "-p", projectName, "-f", composeFileName, "down", "--remove-orphans"},
 			composeDir,
 			envVars,
+			nil,
 		)
 		if strings.TrimSpace(downOut) != "" {
 			outputs = append(outputs, downOut)
@@ -164,7 +248,7 @@ func (e *ComposeExecutor) Destroy(ctx context.Context, appID, composePath string
 	if len(containerIDs) > 0 {
 		e.Logger.Info("Removing lingering containers", "app_id", appID, "containers", len(containerIDs))
 		args := append([]string{"rm", "-f"}, containerIDs...)
-		rmOut, rmErr := e.runCommand(ctx, "docker", args, appDirAbs, nil)
+		rmOut, rmErr := e.runCommand(ctx, "docker", args, appDirAbs, nil, nil)
 		if strings.TrimSpace(rmOut) != "" {
 			outputs = append(outputs, rmOut)
 		}
@@ -196,6 +280,7 @@ func (e *ComposeExecutor) SnapshotProjects(ctx context.Context) (map[string]Proj
 			`{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.oneoff"}}|{{.Status}}`,
 		},
 		e.runtimeWorkDir(),
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -238,58 +323,74 @@ func (e *ComposeExecutor) SnapshotProjects(ctx context.Context) (map[string]Proj
 	return snapshot, nil
 }
 
-func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repoURL, branch, commitHash string, deployKey []byte) error {
+func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repoURL, branch, commitHash string, deployKey []byte) (string, error) {
+	var repoLog strings.Builder
+	appendLogSection(&repoLog, "Repository sync")
+
 	gitEnv, cleanup, err := e.buildGitEnv(appDir, deployKey)
 	if err != nil {
-		return err
+		appendLogLine(&repoLog, "failed to configure git auth environment")
+		appendLogLine(&repoLog, err.Error())
+		return strings.TrimSpace(repoLog.String()), err
 	}
 	defer cleanup()
 
 	gitDir := filepath.Join(repoDir, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		appendLogLine(&repoLog, "repository cache missing; cloning fresh copy")
 		cloneArgs := []string{"clone", "--branch", branch}
 		if commitHash == "" {
 			cloneArgs = append(cloneArgs, "--depth", "1")
 		}
 		cloneArgs = append(cloneArgs, repoURL, repoDir)
-		_, err := e.runCommand(ctx, "git", cloneArgs, appDir, gitEnv)
+		_, err := e.runCommandWithTranscript(ctx, &repoLog, "git", cloneArgs, appDir, gitEnv, nil)
 		if err != nil {
-			return err
+			return strings.TrimSpace(repoLog.String()), err
 		}
 		if commitHash != "" {
-			if _, err := e.runCommand(ctx, "git", []string{"checkout", commitHash}, repoDir, gitEnv); err != nil {
-				return err
+			_, err := e.runCommandWithTranscript(ctx, &repoLog, "git", []string{"checkout", commitHash}, repoDir, gitEnv, nil)
+			if err != nil {
+				return strings.TrimSpace(repoLog.String()), err
 			}
 		}
-		return nil
+		return strings.TrimSpace(repoLog.String()), nil
 	}
 
-	if _, err := e.runCommand(ctx, "git", []string{"fetch", "origin"}, repoDir, gitEnv); err != nil {
-		return err
+	appendLogLine(&repoLog, "repository cache found; fetching latest refs")
+	_, err = e.runCommandWithTranscript(ctx, &repoLog, "git", []string{"fetch", "origin"}, repoDir, gitEnv, nil)
+	if err != nil {
+		return strings.TrimSpace(repoLog.String()), err
 	}
 
 	if commitHash != "" {
-		if _, err := e.runCommand(ctx, "git", []string{"fetch", "origin", commitHash}, repoDir, gitEnv); err != nil {
-			return err
+		_, err := e.runCommandWithTranscript(ctx, &repoLog, "git", []string{"fetch", "origin", commitHash}, repoDir, gitEnv, nil)
+		if err != nil {
+			return strings.TrimSpace(repoLog.String()), err
 		}
-		if _, err := e.runCommand(ctx, "git", []string{"checkout", commitHash}, repoDir, gitEnv); err != nil {
-			return err
+		_, err = e.runCommandWithTranscript(ctx, &repoLog, "git", []string{"checkout", commitHash}, repoDir, gitEnv, nil)
+		if err != nil {
+			return strings.TrimSpace(repoLog.String()), err
 		}
-		if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", commitHash}, repoDir, gitEnv); err != nil {
-			return err
+		_, err = e.runCommandWithTranscript(ctx, &repoLog, "git", []string{"reset", "--hard", commitHash}, repoDir, gitEnv, nil)
+		if err != nil {
+			return strings.TrimSpace(repoLog.String()), err
 		}
 	} else {
-		if _, err := e.runCommand(ctx, "git", []string{"checkout", branch}, repoDir, gitEnv); err != nil {
-			return err
+		_, err := e.runCommandWithTranscript(ctx, &repoLog, "git", []string{"checkout", branch}, repoDir, gitEnv, nil)
+		if err != nil {
+			return strings.TrimSpace(repoLog.String()), err
 		}
-		if _, err := e.runCommand(ctx, "git", []string{"reset", "--hard", "origin/" + branch}, repoDir, gitEnv); err != nil {
-			return err
+		_, err = e.runCommandWithTranscript(ctx, &repoLog, "git", []string{"reset", "--hard", "origin/" + branch}, repoDir, gitEnv, nil)
+		if err != nil {
+			return strings.TrimSpace(repoLog.String()), err
 		}
 	}
-	if _, err := e.runCommand(ctx, "git", []string{"clean", "-fd"}, repoDir, gitEnv); err != nil {
-		return err
+	_, err = e.runCommandWithTranscript(ctx, &repoLog, "git", []string{"clean", "-fd"}, repoDir, gitEnv, nil)
+	if err != nil {
+		return strings.TrimSpace(repoLog.String()), err
 	}
-	return nil
+
+	return strings.TrimSpace(repoLog.String()), nil
 }
 
 func (e *ComposeExecutor) buildGitEnv(appDir string, deployKey []byte) (map[string]string, func(), error) {
@@ -323,7 +424,121 @@ func (e *ComposeExecutor) buildGitEnv(appDir string, deployKey []byte) (map[stri
 	return env, cleanup, nil
 }
 
-func (e *ComposeExecutor) runCommand(ctx context.Context, cmd string, args []string, workDir string, env map[string]string) (string, error) {
+func appendLogSection(builder *strings.Builder, title string) {
+	if builder.Len() > 0 {
+		builder.WriteString("\n\n")
+	}
+	builder.WriteString("=== ")
+	builder.WriteString(strings.TrimSpace(title))
+	builder.WriteString(" ===\n")
+}
+
+func appendLogLine(builder *strings.Builder, line string) {
+	builder.WriteString(strings.TrimSpace(line))
+	builder.WriteString("\n")
+}
+
+func appendLogBlock(builder *strings.Builder, block string) {
+	block = strings.TrimSpace(block)
+	if block == "" {
+		return
+	}
+	if builder.Len() > 0 {
+		builder.WriteString("\n\n")
+	}
+	builder.WriteString(block)
+}
+
+func appendCommandOutput(builder *strings.Builder, output string) {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		builder.WriteString("(no output)\n")
+		return
+	}
+	builder.WriteString(trimmed)
+	builder.WriteString("\n")
+}
+
+func formatCommand(cmd string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, cmd)
+	for _, arg := range args {
+		if strings.ContainsAny(arg, " \t") {
+			parts = append(parts, fmt.Sprintf("%q", arg))
+			continue
+		}
+		parts = append(parts, arg)
+	}
+	return strings.Join(parts, " ")
+}
+
+func (e *ComposeExecutor) runCommandWithTranscript(
+	ctx context.Context,
+	transcript *strings.Builder,
+	cmd string,
+	args []string,
+	workDir string,
+	env map[string]string,
+	onProgress func(string),
+) (string, error) {
+	var mu sync.Mutex
+	appendToTranscript := func(value string) {
+		mu.Lock()
+		transcript.WriteString(value)
+		mu.Unlock()
+	}
+	snapshot := func() string {
+		mu.Lock()
+		value := strings.TrimSpace(transcript.String())
+		mu.Unlock()
+		return value
+	}
+
+	command := formatCommand(cmd, args)
+	appendToTranscript("$ " + command + "\n")
+	if onProgress != nil {
+		onProgress(snapshot())
+	}
+
+	sawOutput := false
+	output, err := e.runCommand(ctx, cmd, args, workDir, env, func(chunk string) {
+		if chunk == "" {
+			return
+		}
+		appendToTranscript(chunk)
+		mu.Lock()
+		sawOutput = true
+		mu.Unlock()
+		if onProgress != nil {
+			onProgress(snapshot())
+		}
+	})
+	mu.Lock()
+	noOutput := !sawOutput
+	mu.Unlock()
+	if noOutput {
+		appendToTranscript("(no output)\n")
+		if onProgress != nil {
+			onProgress(snapshot())
+		}
+	}
+	if err != nil {
+		appendToTranscript("ERROR: " + err.Error() + "\n")
+		if onProgress != nil {
+			onProgress(snapshot())
+		}
+	}
+	return output, err
+}
+
+func (e *ComposeExecutor) runCommand(
+	ctx context.Context,
+	cmd string,
+	args []string,
+	workDir string,
+	env map[string]string,
+	onOutput func(string),
+) (string, error) {
 	start := time.Now()
 	command := exec.CommandContext(ctx, cmd, args...)
 	command.Dir = workDir
@@ -343,16 +558,66 @@ func (e *ComposeExecutor) runCommand(ctx context.Context, cmd string, args []str
 		"env_keys", sortedKeys(env),
 	)
 
-	output, err := command.CombinedOutput()
-	trimmed := strings.TrimSpace(string(output))
+	pipeReader, pipeWriter := io.Pipe()
+	command.Stdout = pipeWriter
+	command.Stderr = pipeWriter
+
+	var outputMu sync.Mutex
+	var outputBuilder strings.Builder
+	readDone := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := pipeReader.Read(buf)
+			if n > 0 {
+				chunk := string(buf[:n])
+				outputMu.Lock()
+				outputBuilder.WriteString(chunk)
+				outputMu.Unlock()
+				if onOutput != nil {
+					onOutput(chunk)
+				}
+			}
+
+			if readErr != nil {
+				if errors.Is(readErr, io.EOF) {
+					readDone <- nil
+				} else {
+					readDone <- readErr
+				}
+				return
+			}
+		}
+	}()
+
+	if err := command.Start(); err != nil {
+		_ = pipeWriter.Close()
+		_ = <-readDone
+		_ = pipeReader.Close()
+		return "", fmt.Errorf("command start failed: %w", err)
+	}
+
+	waitErr := command.Wait()
+	_ = pipeWriter.Close()
+	streamErr := <-readDone
+	_ = pipeReader.Close()
+
+	if streamErr != nil && e.Logger != nil {
+		e.Logger.Warn("Command output stream failed", "cmd", command.String(), "error", streamErr)
+	}
+
+	outputMu.Lock()
+	output := outputBuilder.String()
+	outputMu.Unlock()
+	trimmed := strings.TrimSpace(output)
 	if trimmed != "" {
 		e.Logger.Info("Command output", "cmd", command.String(), "output", truncateOutput(trimmed))
 	}
 
-	if err != nil {
+	if waitErr != nil {
 		exitCode := -1
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(waitErr, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) {
@@ -365,7 +630,7 @@ func (e *ComposeExecutor) runCommand(ctx context.Context, cmd string, args []str
 			"exit_code", exitCode,
 			"elapsed_ms", time.Since(start).Milliseconds(),
 		)
-		return string(output), fmt.Errorf("command failed: %w", err)
+		return output, fmt.Errorf("command failed: %w", waitErr)
 	}
 
 	e.Logger.Info(
@@ -374,7 +639,7 @@ func (e *ComposeExecutor) runCommand(ctx context.Context, cmd string, args []str
 		"elapsed_ms", time.Since(start).Milliseconds(),
 	)
 
-	return string(output), nil
+	return output, nil
 }
 
 func (e *ComposeExecutor) listContainerIDsForCleanup(ctx context.Context, projectName, workingDir string) ([]string, error) {
@@ -424,7 +689,7 @@ func (e *ComposeExecutor) listContainerIDsByFilter(ctx context.Context, filters 
 		args = append(args, "--filter", filter)
 	}
 
-	output, err := e.runCommand(ctx, "docker", args, workDir, nil)
+	output, err := e.runCommand(ctx, "docker", args, workDir, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("docker ps failed: %w", err)
 	}
@@ -508,6 +773,7 @@ func (e *ComposeExecutor) InspectProjectContainers(ctx context.Context, projectN
 			"--format", `{{.Label "com.docker.compose.service"}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.Names}}`,
 		},
 		e.runtimeWorkDir(),
+		nil,
 		nil,
 	)
 	if err != nil {

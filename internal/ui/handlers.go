@@ -135,21 +135,10 @@ func (h *Handler) ServeNewAppPage(w http.ResponseWriter, r *http.Request) {
 // ServeAppDetailPage handles the app detail page.
 func (h *Handler) ServeAppDetailPage(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	app, err := h.Registry.Get(id)
+	detail, err := h.loadAppDetail(r, id)
 	if err != nil {
 		http.Error(w, "App not found", http.StatusNotFound)
 		return
-	}
-
-	detail := toAppDetailView(app)
-
-	// Fetch runtime container information if executor is available.
-	if h.Executor != nil {
-		projectName := compose.ProjectNameForApp(app.ID)
-		containers, inspectErr := h.Executor.InspectProjectContainers(r.Context(), projectName)
-		if inspectErr == nil {
-			enrichWithContainerData(&detail, containers)
-		}
 	}
 
 	data := AppsPageData{
@@ -157,6 +146,24 @@ func (h *Handler) ServeAppDetailPage(w http.ResponseWriter, r *http.Request) {
 		App:  detail,
 	}
 	if err := h.Tmpl.ExecuteTemplate(w, "base", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// ServeAppDetailFragment handles HTMX refresh requests for app details.
+func (h *Handler) ServeAppDetailFragment(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	detail, err := h.loadAppDetail(r, id)
+	if err != nil {
+		http.Error(w, "App not found", http.StatusNotFound)
+		return
+	}
+
+	data := AppsPageData{
+		Page: "detail",
+		App:  detail,
+	}
+	if err := h.Tmpl.ExecuteTemplate(w, "app-detail-live", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -236,6 +243,26 @@ func (h *Handler) HandleAddApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, "/ui/apps/"+app.ID, http.StatusSeeOther)
+}
+
+func (h *Handler) loadAppDetail(r *http.Request, id string) (AppDetailView, error) {
+	app, err := h.Registry.Get(id)
+	if err != nil {
+		return AppDetailView{}, err
+	}
+
+	detail := toAppDetailView(app)
+
+	// Fetch runtime container information if executor is available.
+	if h.Executor != nil {
+		projectName := compose.ProjectNameForApp(app.ID)
+		containers, inspectErr := h.Executor.InspectProjectContainers(r.Context(), projectName)
+		if inspectErr == nil {
+			enrichWithContainerData(&detail, containers)
+		}
+	}
+
+	return detail, nil
 }
 
 func (h *Handler) renderNewAppPage(w http.ResponseWriter, statusCode int, form AppFormData, errorMessage string) {

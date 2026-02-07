@@ -11,8 +11,10 @@ services:
       - DB_CONNECTION_STRING=postgres://conops:secret@postgres:5432/conops?sslmode=disable
       - CONOPS_RECONCILE_INTERVAL=10s
       - CONOPS_SYNC_TIMEOUT=5m
+      - CONOPS_RUNTIME_DIR=${CONOPS_RUNTIME_DIR:-/tmp/conops-runtime}
     volumes:
       - ./web:/app/web
+      - ${CONOPS_RUNTIME_DIR:-/tmp/conops-runtime}:${CONOPS_RUNTIME_DIR:-/tmp/conops-runtime}
       - conops_data:/data
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

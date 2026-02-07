@@ -331,6 +331,26 @@ func (s *PostgresStore) UpdateAppSyncResult(
 	return nil
 }
 
+func (s *PostgresStore) UpdateAppSyncProgress(ctx context.Context, id string, lastSyncAt time.Time, syncOutput string) error {
+	query := `
+	UPDATE apps
+	SET
+		status = $1,
+		last_sync_at = $2,
+		last_sync_output = $3,
+		last_sync_error = ''
+	WHERE id = $4
+	`
+	ct, err := s.pool.Exec(ctx, query, "syncing", lastSyncAt, syncOutput, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("app not found")
+	}
+	return nil
+}
+
 func (s *PostgresStore) UpdateAppStatus(ctx context.Context, id, status string, lastSyncAt *time.Time) error {
 	if lastSyncAt == nil {
 		query := `UPDATE apps SET status = $1 WHERE id = $2`

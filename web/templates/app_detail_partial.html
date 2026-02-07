@@ -1,0 +1,278 @@
+{{define "app-detail-live"}}
+<div
+    id="app-detail-live"
+    hx-get="/ui/apps/{{.App.ID}}/fragment"
+    hx-trigger="every 2s"
+    hx-swap="outerHTML">
+    {{template "app-detail-content" .}}
+</div>
+{{end}}
+
+{{define "app-detail-content"}}
+<section
+    class="space-y-4"
+    x-data="{ tab: localStorage.getItem('conops-app-tab-{{.App.ID}}') || 'summary' }"
+    x-effect="localStorage.setItem('conops-app-tab-{{.App.ID}}', tab)"
+    x-cloak>
+    <a href="/ui/apps" class="inline-flex items-center gap-1.5 text-sm text-base-content/60 hover:text-base-content transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        Applications
+    </a>
+
+    {{if .App.LastSyncError}}
+    <div role="alert" class="alert alert-error alert-soft text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <div>
+            <span class="font-semibold">Sync error:</span>
+            {{.App.LastSyncError}}
+        </div>
+    </div>
+    {{end}}
+
+    <div class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body p-5 gap-5">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <h1 class="text-2xl font-bold tracking-tight">{{.App.Name}}</h1>
+                        <span class="badge
+                            {{if eq .App.Status "synced"}}badge-success
+                            {{else if eq .App.Status "syncing"}}badge-info
+                            {{else if eq .App.Status "pending"}}badge-warning
+                            {{else if eq .App.Status "error"}}badge-error
+                            {{else}}badge-neutral{{end}}">
+                            {{.App.Status}}
+                        </span>
+                    </div>
+                    <p class="text-sm text-base-content/50 mt-1 truncate">{{.App.RepoURL}} &middot; {{.App.Branch}}</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    {{if or (eq .App.Status "syncing") (eq .App.Status "pending")}}
+                    <button class="btn btn-primary btn-sm gap-1.5" disabled>
+                        <span class="loading loading-spinner loading-xs"></span>
+                        {{if eq .App.Status "pending"}}Queued&hellip;{{else}}Syncing&hellip;{{end}}
+                    </button>
+                    {{else}}
+                    <button
+                        hx-post="/api/v1/apps/{{.App.ID}}/sync"
+                        hx-swap="none"
+                        hx-disabled-elt="this"
+                        hx-on::after-request="htmx.ajax('GET', '/ui/apps/{{.App.ID}}/fragment', '#app-detail-live')"
+                        class="btn btn-primary btn-sm gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        Sync
+                    </button>
+                    {{end}}
+                    <button
+                        hx-delete="/api/v1/apps/{{.App.ID}}"
+                        hx-confirm="Are you sure you want to delete this application? Running containers will be stopped."
+                        hx-target="body" hx-swap="none"
+                        hx-on::after-request="if(event.detail.successful){window.location='/ui/apps';}"
+                        class="btn btn-ghost btn-sm text-error">
+                        Delete
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div class="bg-base-200/60 rounded-lg px-4 py-3">
+                    <div class="text-[11px] font-medium uppercase tracking-wider text-base-content/45">Containers</div>
+                    <div class="text-lg font-semibold mt-0.5">
+                        {{.App.RunningCount}}<span class="text-base-content/30 font-normal">&thinsp;/&thinsp;{{.App.ContainerCount}}</span>
+                    </div>
+                </div>
+                <div class="bg-base-200/60 rounded-lg px-4 py-3">
+                    <div class="text-[11px] font-medium uppercase tracking-wider text-base-content/45">Health</div>
+                    <div class="text-lg font-semibold mt-0.5
+                        {{if eq .App.HealthLabel "Healthy"}}text-success
+                        {{else if eq .App.HealthLabel "Degraded"}}text-warning
+                        {{else if eq .App.HealthLabel "Down"}}text-error
+                        {{else}}text-base-content/40{{end}}">
+                        {{.App.HealthLabel}}
+                    </div>
+                </div>
+                <div class="bg-base-200/60 rounded-lg px-4 py-3">
+                    <div class="text-[11px] font-medium uppercase tracking-wider text-base-content/45">Last Sync</div>
+                    <div class="text-lg font-semibold mt-0.5" title="{{.App.LastSyncAt}}">{{.App.LastSyncAtRelative}}</div>
+                </div>
+                <div class="bg-base-200/60 rounded-lg px-4 py-3">
+                    <div class="text-[11px] font-medium uppercase tracking-wider text-base-content/45">Revision</div>
+                    <div class="flex items-center gap-2 mt-0.5">
+                        <code class="text-lg font-semibold">{{.App.LastSyncedCommitShort}}</code>
+                        {{if .App.InSync}}
+                        <span class="badge badge-success badge-xs">in sync</span>
+                        {{else}}
+                        <span class="badge badge-warning badge-xs">out of sync</span>
+                        {{end}}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body p-0">
+            <div class="border-b border-base-300">
+                <nav class="flex gap-0 px-5">
+                    <button @click="tab = 'summary'"
+                        :class="tab === 'summary' ? 'border-primary text-primary' : 'border-transparent text-base-content/50 hover:text-base-content/80'"
+                        class="px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer">
+                        Summary
+                    </button>
+                    <button @click="tab = 'containers'"
+                        :class="tab === 'containers' ? 'border-primary text-primary' : 'border-transparent text-base-content/50 hover:text-base-content/80'"
+                        class="px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer">
+                        Containers
+                        {{if .App.Services}}<span class="ml-1 badge badge-sm badge-ghost">{{len .App.Services}}</span>{{end}}
+                    </button>
+                    <button @click="tab = 'logs'"
+                        :class="tab === 'logs' ? 'border-primary text-primary' : 'border-transparent text-base-content/50 hover:text-base-content/80'"
+                        class="px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer">
+                        Logs
+                    </button>
+                </nav>
+            </div>
+
+            <div x-show="tab === 'summary'" class="p-5 space-y-6">
+                <div>
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-base-content/40 mb-3">Source</h3>
+                    <dl class="border border-base-300 rounded-lg divide-y divide-base-300 text-sm">
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">Repository</dt>
+                            <dd class="font-medium truncate"><a class="link link-hover" href="{{.App.RepoURL}}" target="_blank">{{.App.RepoURL}}</a></dd>
+                        </div>
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">Branch</dt>
+                            <dd class="font-medium"><code>{{.App.Branch}}</code></dd>
+                        </div>
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">Compose Path</dt>
+                            <dd class="font-medium"><code>{{.App.ComposePath}}</code></dd>
+                        </div>
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">Access</dt>
+                            <dd class="font-medium"><code>{{.App.RepoAuth}}</code></dd>
+                        </div>
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">Poll Interval</dt>
+                            <dd class="font-medium"><code>{{.App.PollInterval}}</code></dd>
+                        </div>
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">App ID</dt>
+                            <dd class="font-medium"><code class="text-xs">{{.App.ID}}</code></dd>
+                        </div>
+                    </dl>
+                </div>
+
+                <div>
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-base-content/40 mb-3">Sync State</h3>
+                    <dl class="border border-base-300 rounded-lg divide-y divide-base-300 text-sm">
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">Desired</dt>
+                            <dd class="font-medium">
+                                <code>{{.App.LastSeenCommitShort}}</code>
+                                {{if and (ne .App.LastSeenCommitMessage "n/a") (ne .App.LastSeenCommitMessage "")}}
+                                <span class="text-base-content/50 ml-1.5">{{.App.LastSeenCommitMessage}}</span>
+                                {{end}}
+                            </dd>
+                        </div>
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">Synced</dt>
+                            <dd class="font-medium">
+                                <code>{{.App.LastSyncedCommitShort}}</code>
+                                {{if and (ne .App.LastSyncedCommitMessage "n/a") (ne .App.LastSyncedCommitMessage "")}}
+                                <span class="text-base-content/50 ml-1.5">{{.App.LastSyncedCommitMessage}}</span>
+                                {{end}}
+                            </dd>
+                        </div>
+                        <div class="flex flex-col sm:flex-row px-4 py-3 gap-1 sm:gap-0">
+                            <dt class="text-base-content/50 sm:w-44 shrink-0">Last Sync</dt>
+                            <dd class="font-medium">
+                                {{.App.LastSyncAtRelative}}
+                                {{if ne .App.LastSyncAt "n/a"}}
+                                <span class="text-base-content/40 ml-1.5 text-xs">({{.App.LastSyncAt}})</span>
+                                {{end}}
+                            </dd>
+                        </div>
+                    </dl>
+                </div>
+            </div>
+
+            <div x-show="tab === 'containers'" class="p-5">
+                {{if .App.Services}}
+                <div class="overflow-x-auto">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr class="text-xs uppercase tracking-wider text-base-content/40">
+                                <th>Service</th>
+                                <th>Image</th>
+                                <th>Status</th>
+                                <th>Ports</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .App.Services}}
+                            <tr>
+                                <td class="font-medium">{{.Service}}</td>
+                                <td><code class="text-xs bg-base-200 px-1.5 py-0.5 rounded">{{.Image}}</code></td>
+                                <td>
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-2 h-2 rounded-full shrink-0
+                                            {{if eq .Status "running"}}bg-success
+                                            {{else}}bg-error{{end}}"></span>
+                                        <span>{{.Status}}</span>
+                                        {{if .Health}}
+                                        <span class="badge badge-xs
+                                            {{if eq .Health "healthy"}}badge-success
+                                            {{else if eq .Health "unhealthy"}}badge-error
+                                            {{else}}badge-warning{{end}}">
+                                            {{.Health}}
+                                        </span>
+                                        {{end}}
+                                    </div>
+                                </td>
+                                <td>
+                                    {{if .Ports}}
+                                    <code class="text-xs">{{.Ports}}</code>
+                                    {{else}}
+                                    <span class="text-base-content/30">&ndash;</span>
+                                    {{end}}
+                                </td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <div class="text-center py-10 text-base-content/40">
+                    <svg class="w-10 h-10 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                    <p class="text-sm font-medium">No containers found</p>
+                    <p class="text-xs mt-1">Containers will appear after the first successful sync.</p>
+                </div>
+                {{end}}
+            </div>
+
+            <div x-show="tab === 'logs'" class="p-5 space-y-3">
+                {{if or (eq .App.Status "syncing") (eq .App.Status "pending")}}
+                <div class="alert alert-info alert-soft text-sm">
+                    <span class="loading loading-spinner loading-xs"></span>
+                    <span>{{if eq .App.Status "pending"}}Sync is queued and waiting for repository refresh.{{else}}Sync is running and logs refresh every 2 seconds.{{end}}</span>
+                </div>
+                {{end}}
+
+                {{if .App.LastSyncOutput}}
+                <div class="rounded-lg border border-base-300 bg-base-200/60 overflow-x-auto">
+                    <pre class="p-4 text-sm text-base-content whitespace-pre-wrap break-words font-mono leading-relaxed">{{.App.LastSyncOutput}}</pre>
+                </div>
+                {{else}}
+                <div class="text-center py-10 text-base-content/40">
+                    <svg class="w-10 h-10 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    <p class="text-sm font-medium">No sync logs yet</p>
+                    <p class="text-xs mt-1">Logs will appear after the first sync operation.</p>
+                </div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+</section>
+{{end}}

@@ -31,6 +31,7 @@ type Store interface {
 		syncOutput string,
 		syncError string,
 	) error
+	UpdateAppSyncProgress(ctx context.Context, id string, lastSyncAt time.Time, syncOutput string) error
 	Close()
 }
 

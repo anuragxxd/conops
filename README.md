@@ -1,245 +1,212 @@
-# ConOps
+<h1 align="center">ConOps</h1>
 
-ConOps brings GitOps-style workflows to Docker Compose.
-It gives you an Argo CD-like control plane for teams that are not running
-Kubernetes, but still want repo-driven deployments, continuous reconciliation,
-and a clean operational UI.
+<p align="center">
+  <strong>GitOps for Docker Compose. Like Argo CD, but without Kubernetes.</strong>
+</p>
 
-![ConOps logo](./web/static/assets/conops.png)
+<p align="center">
+  Point ConOps at a Git repo containing a <code>docker-compose.yaml</code>.<br>
+  It clones, pulls, deploys, watches for new commits, detects container drift, and self-heals.<br>
+  One binary. No cluster required.
+</p>
 
-## Why ConOps
+<p align="center">
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#features">Features</a> &middot;
+  <a href="#how-it-works">How It Works</a> &middot;
+  <a href="#configuration">Configuration</a> &middot;
+  <a href="#api-reference">API</a>
+</p>
 
-If your stack runs on Docker Compose, you still need safe, repeatable, and
-observable deploys. ConOps gives you that without introducing Kubernetes.
+---
 
-- Track app definitions in Git.
-- Detect new commits automatically.
-- Reconcile runtime state continuously.
-- Recover from container drift.
-- Deploy public repos and private GitHub repos with deploy keys.
+  ![ConOps Demo](docs/media/conops-demo.gif)
 
-## What you get
 
-ConOps is a single controller process with a web UI and API.
-It focuses on practical GitOps for lightweight self-hosted environments.
+## The Problem
 
-- **UI dashboard** at `/ui/apps` to register, inspect, sync, and delete apps.
-- **REST API** at `/api/v1/apps` for automation.
-- **Git watcher** that polls configured branches and marks apps pending on new
-  commits.
-- **Reconciler loop** that runs `docker compose pull` and
-  `docker compose up -d --remove-orphans`.
-- **Runtime drift checks** that requeue apps when containers are missing,
-  unhealthy, or exited.
-- **Encrypted deploy key storage** for private repository access.
-- **SQLite or PostgreSQL storage** depending on your deployment mode.
+You're running services with Docker Compose. Deployments are SSH-and-pray. You `git pull` on the server, run `docker compose up -d`, and hope nothing drifted while you weren't looking. There's no audit trail, no automatic rollout on push, and no visibility into what's actually running vs. what's in Git.
 
-## Quick start with Docker Compose
+Kubernetes has Argo CD and Flux for this. Docker Compose has had nothing. Until now.
 
-The fastest way to run ConOps is with the included `docker-compose.yml`.
-This starts the controller and PostgreSQL.
+## What ConOps Does
 
-1. Start ConOps.
+ConOps is a single controller that continuously reconciles your Docker Compose applications against their Git source of truth.
 
-   ```bash
-   docker compose up --build
-   ```
+1. **You register an app** &mdash; a Git repo, a branch, and a path to a compose file.
+2. **ConOps polls the branch** &mdash; when it sees a new commit, it marks the app as pending.
+3. **The reconciler kicks in** &mdash; it clones/fetches the repo, runs `docker compose pull` and `docker compose up -d --remove-orphans`.
+4. **Drift detection runs continuously** &mdash; if a container crashes, exits, or goes unhealthy, ConOps re-deploys automatically.
 
-2. Open the dashboard.
+You get a web dashboard for visibility and a REST API for automation.
 
-   ```text
-   http://localhost:8080/ui/apps
-   ```
+## Features
 
-3. Register your first app from **New App** in the UI.
+- **Git-driven deployments** &mdash; push to your branch, ConOps handles the rest
+- **Continuous reconciliation** &mdash; configurable loop that keeps desired state in sync
+- **Self-healing** &mdash; detects missing, exited, or unhealthy containers and recovers
+- **Web UI** &mdash; register apps, inspect status, view containers, trigger syncs, read logs
+- **REST API + CLI** &mdash; automate everything; nothing in the UI that the API can't do
+- **Private repo support** &mdash; GitHub deploy keys with AES-GCM encryption at rest
+- **SQLite or PostgreSQL** &mdash; SQLite for single-node, Postgres for production
+- **Single binary** &mdash; no runtime dependencies beyond Docker and Git
+- **Multi-arch Docker image** &mdash; `linux/amd64` and `linux/arm64`
 
-4. Push a commit to your tracked branch and watch ConOps reconcile it.
+## Quick Start
 
-## Quick start with local binaries
-
-If you prefer local binaries, run ConOps directly on your host.
-In this mode, SQLite is used by default.
-
-1. Build controller and CLI binaries.
-
-   ```bash
-   go build -o ./bin/conops ./cmd/conops
-   go build -o ./bin/conops-ctl ./cmd/conops-ctl
-   ```
-
-2. Start the controller.
-
-   ```bash
-   ./bin/conops
-   ```
-
-3. In a new terminal, list apps through the CLI.
-
-   ```bash
-   ./bin/conops-ctl apps list
-   ```
-
-## Register an app via API
-
-You can automate registration with a JSON payload.
-ConOps defaults `branch` to `main`, `compose_path` to `compose.yaml`, and
-`poll_interval` to `30s` when omitted.
+### Docker (recommended)
 
 ```bash
-cat > /tmp/app.json <<'JSON'
-{
-  "name": "whoami",
-  "repo_url": "https://github.com/traefik/whoami.git",
-  "repo_auth_method": "public",
-  "branch": "main",
-  "compose_path": "compose.yaml",
-  "poll_interval": "30s"
-}
-JSON
+docker run \
+  --name conops \
+  -p 8080:8080 \
+  -e CONOPS_RUNTIME_DIR=/tmp/conops-runtime \
+  -v /tmp/conops-runtime:/tmp/conops-runtime \
+  -v conops_data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  anurag1201/conops:latest
+```
 
+This uses SQLite by default. SQLite is fine for daily use, but we recommend
+PostgreSQL for production. You can pass the Postgres environment variables
+(`DB_TYPE=postgres` and `DB_CONNECTION_STRING=postgres://...`) to ConOps to
+enable that.
+
+`CONOPS_RUNTIME_DIR` is important when ConOps runs in Docker and talks to the
+host daemon through `/var/run/docker.sock`. Use a host bind-mounted absolute
+path so Compose bind mounts and file-based secrets resolve correctly.
+
+Open **http://localhost:8080** and register your first app.
+
+### Register your first app
+
+From the UI, click **New App**. Or use the API:
+
+```bash
 curl -X POST http://localhost:8080/api/v1/apps/ \
   -H "Content-Type: application/json" \
-  --data @/tmp/app.json
+  -d '{
+    "name": "Example Application",
+    "repo_url": "https://github.com/docker/awesome-compose",
+    "repo_auth_method": "public",
+    "branch": "master",
+    "compose_path": "fastapi/compose.yaml",
+    "poll_interval": "30s"
+  }'
 ```
 
-List apps:
+Push a commit to the tracked branch and watch ConOps pick it up and deploy.
+
+## How It Works
+
+```
+                    ┌─────────────┐
+                    │  Git Repo   │
+                    └──────┬──────┘
+                           │ poll
+                    ┌──────▼──────┐
+                    │ Git Watcher │──── new commit? ──→ mark pending
+                    └─────────────┘
+                           │
+                    ┌──────▼──────┐
+                    │ Reconciler  │──── clone/fetch → compose pull → compose up
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │Drift Checker│──── container missing/exited/unhealthy? → requeue
+                    └─────────────┘
+```
+
+**Status flow:**
+
+`registered` &rarr; `pending` &rarr; `syncing` &rarr; `synced`
+
+If something goes wrong: `syncing` &rarr; `error` (retryable).
+
+If a container drifts: `synced` &rarr; `pending` &rarr; re-reconcile.
+
+ConOps separates **change detection** (Git watcher) from **state application** (reconciler). This keeps the control loop predictable and easy to reason about.
+
+## Private Repositories
+
+ConOps supports private GitHub repos via SSH deploy keys.
 
 ```bash
-curl http://localhost:8080/api/v1/apps/
+curl -X POST http://localhost:8080/api/v1/apps/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-private-app",
+    "repo_url": "git@github.com:your-org/private-repo.git",
+    "repo_auth_method": "deploy_key",
+    "deploy_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----",
+    "branch": "main",
+    "compose_path": "docker-compose.yml"
+  }'
 ```
 
-Force sync by app ID:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/apps/<app-id>/sync
-```
-
-Delete an app by app ID:
-
-```bash
-curl -X DELETE http://localhost:8080/api/v1/apps/<app-id>
-```
-
-## Private repo support with deploy keys
-
-ConOps supports private repositories using GitHub deploy keys.
-For this mode, use an SSH repo URL and provide the private key on registration.
-
-```json
-{
-  "name": "private-app",
-  "repo_url": "git@github.com:your-org/private-repo.git",
-  "repo_auth_method": "deploy_key",
-  "deploy_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----",
-  "branch": "main",
-  "compose_path": "deploy/compose.yaml"
-}
-```
-
-Deploy key requirements:
-
-- Host must be `github.com`.
-- URL must be SSH format.
-- Passphrase-protected private keys are not supported.
-- Keys are encrypted at rest.
+Deploy keys are encrypted at rest using AES-GCM. ConOps auto-generates an encryption key on first run, or you can provide your own via `CONOPS_ENCRYPTION_KEY`. Strict SSH host verification is enforced.
 
 ## Configuration
 
-ConOps behavior is controlled through environment variables.
-These values are read by the controller process.
+All configuration is via environment variables.
 
 | Variable | Default | Description |
-| --- | --- | --- |
-| `DB_TYPE` | `sqlite` | `sqlite` or `postgres` |
-| `DB_CONNECTION_STRING` | empty | Required when `DB_TYPE=postgres` |
-| `CONOPS_RECONCILE_INTERVAL` | `10s` | Interval for reconcile loop |
-| `CONOPS_SYNC_TIMEOUT` | `5m` | Max duration of one sync |
-| `CONOPS_RETRY_ERRORS` | `false` | Retry apps in `error` status |
-| `CONOPS_ENCRYPTION_KEY` | empty | Optional 32-byte raw or base64 key |
-| `CONOPS_ENCRYPTION_KEY_FILE` | `/data/conops-encryption.key` (container) | Path for generated/read encryption key |
-| `CONOPS_KNOWN_HOSTS_FILE` | auto-resolved | Known hosts file for strict SSH verification |
+|----------|---------|-------------|
+| `DB_TYPE` | `sqlite` | Storage backend: `sqlite` or `postgres` |
+| `DB_CONNECTION_STRING` | &mdash; | Required when using `postgres` |
+| `CONOPS_RECONCILE_INTERVAL` | `10s` | How often the reconciler runs |
+| `CONOPS_SYNC_TIMEOUT` | `5m` | Max duration for a single sync operation |
+| `CONOPS_RETRY_ERRORS` | `false` | Auto-retry apps that entered `error` status |
+| `CONOPS_RUNTIME_DIR` | `./.conops-runtime` | Runtime checkout directory used for compose execution |
+| `CONOPS_ENCRYPTION_KEY` | &mdash; | 32-byte key (raw or base64) for deploy key encryption |
+| `CONOPS_ENCRYPTION_KEY_FILE` | `/data/conops-encryption.key` | Path to read/write the encryption key |
+| `CONOPS_KNOWN_HOSTS_FILE` | auto | SSH known_hosts file for host verification |
 
-## How reconciliation works
+## API Reference
 
-ConOps separates change detection from runtime apply.
-This keeps the control loop predictable and easy to reason about.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Redirects to dashboard |
+| `GET` | `/ui/apps` | Web dashboard |
+| `GET` | `/ui/apps/new` | App registration form |
+| `GET` | `/ui/apps/{id}` | App detail view |
+| `GET` | `/api/v1/apps/` | List all apps |
+| `POST` | `/api/v1/apps/` | Register a new app |
+| `GET` | `/api/v1/apps/{id}` | Get app details |
+| `POST` | `/api/v1/apps/{id}/sync` | Force sync |
+| `DELETE` | `/api/v1/apps/{id}` | Delete app and its resources |
 
-```mermaid
-flowchart LR
-  A["Git watcher polls repo branch"] --> B["New commit detected"]
-  B --> C["App marked pending"]
-  C --> D["Reconciler marks syncing"]
-  D --> E["Clone/fetch repo and resolve compose path"]
-  E --> F["docker compose pull + up -d"]
-  F --> G["App marked synced"]
-  G --> H["Drift check keeps runtime healthy"]
+### CLI
+
+```bash
+./bin/conops-ctl apps list              # List all apps
+./bin/conops-ctl apps add app.json      # Register from JSON file
+./bin/conops-ctl apps delete <app-id>   # Delete an app
 ```
 
-Typical status flow:
+## Who Is This For
 
-- `registered` when app is created.
-- `pending` when a new commit is detected or drift is found.
-- `syncing` while apply runs.
-- `synced` when apply succeeds.
-- `error` when apply fails.
-
-## API and UI endpoints
-
-ConOps exposes both machine and human interfaces.
-Use the API for automation and the UI for fast operations.
-
-- `GET /` redirects to `/ui/apps`.
-- `GET /ui/apps` shows the app dashboard.
-- `GET /ui/apps/new` opens app registration.
-- `GET /api/v1/apps/` lists apps.
-- `POST /api/v1/apps/` creates an app.
-- `GET /api/v1/apps/{id}` gets app details.
-- `POST /api/v1/apps/{id}/sync` force syncs an app.
-- `DELETE /api/v1/apps/{id}` deletes an app and runtime resources.
-
-## Media you should add before public launch
-
-Strong media improves trust and adoption.
-For launch posts and README previews, add one short video and two screenshots.
-
-- `docs/media/conops-dashboard.png`: app list page.
-- `docs/media/conops-app-detail.png`: app detail with status and commit.
-- `docs/media/conops-register-app.png`: app registration form.
-- `docs/media/conops-demo.gif`: 20 to 45 second end-to-end flow.
-
-When files are ready, embed them near the top of this README:
-
-```md
-![ConOps dashboard](docs/media/conops-dashboard.png)
-![ConOps app detail](docs/media/conops-app-detail.png)
-```
-
-## Positioning for users
-
-ConOps is best for teams that want GitOps outcomes without Kubernetes.
-It is effective for edge, homelab, SMB infrastructure, and internal tools.
-
-- "Argo CD for Docker Compose."
-- "Git is your control plane, Compose is your runtime."
-- "Continuous reconciliation for non-Kubernetes stacks."
+- **Homelab operators** who want git push deploys without Kubernetes
+- **Small teams** running production on Docker Compose who need deployment visibility
+- **Edge deployments** where Kubernetes is overkill but manual deploys are unacceptable
+- **Anyone** who's tired of SSH-ing into servers to run `docker compose up`
 
 ## Development
 
-You can run the controller and API locally during development.
-The service listens on port `8080`.
-
 ```bash
+# Run the controller locally
 go run ./cmd/conops
+
+# Run tests
+go test ./...
 ```
 
-To run tests:
+The controller starts on `:8080` with SQLite by default.
 
-```bash
-GOCACHE=$(pwd)/.conops-cache/go-build go test ./...
-```
+## Contributing
+
+Contributions are welcome. Open an issue to discuss larger changes before submitting a PR.
 
 ## License
 
-This repository does not currently include a `LICENSE` file.
-Add one before public distribution so users know reuse terms.
-
+Apache 2.0 &mdash; see [LICENSE](LICENSE).

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/conops/conops/internal/compose"
 	"github.com/conops/conops/internal/controller"
@@ -75,6 +76,10 @@ func main() {
 		os.Exit(1)
 	}
 	executor := compose.NewComposeExecutor(logger)
+	if runtimeDir := strings.TrimSpace(os.Getenv("CONOPS_RUNTIME_DIR")); runtimeDir != "" {
+		executor.WorkDir = runtimeDir
+	}
+	logger.Info("Runtime workspace configured", "dir", executor.WorkDir)
 	reconciler := controller.NewReconciler(registry, executor, logger, reconcilerCfg)
 	go reconciler.Run(ctx)
 
@@ -96,6 +101,7 @@ func main() {
 		r.Get("/apps/new", uiHandler.ServeNewAppPage)
 		r.Get("/apps/fragment", uiHandler.ServeAppsFragment)
 		r.Get("/apps/{id}", uiHandler.ServeAppDetailPage)
+		r.Get("/apps/{id}/fragment", uiHandler.ServeAppDetailFragment)
 		r.Post("/apps", uiHandler.HandleAddApp)
 		r.Post("/apps/add", uiHandler.HandleAddApp)
 		r.Handle("/static/*", http.StripPrefix("/ui/static/", http.FileServer(http.Dir("web/static"))))

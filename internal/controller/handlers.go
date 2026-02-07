@@ -30,7 +30,14 @@ type RuntimeCleaner interface {
 
 // RuntimeApplier applies desired app state to the runtime.
 type RuntimeApplier interface {
-	Apply(ctx context.Context, appID, content string, envVars map[string]string, repoURL, branch, composePath, commitHash string, deployKey []byte) (string, error)
+	Apply(
+		ctx context.Context,
+		appID, content string,
+		envVars map[string]string,
+		repoURL, branch, composePath, commitHash string,
+		deployKey []byte,
+		onProgress func(string),
+	) (string, error)
 }
 
 // Handler handles HTTP requests for the controller.
@@ -160,7 +167,13 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Registry.UpdateStatus(app.ID, "syncing", nil); err != nil && h.Logger != nil {
+	if app.Status == "syncing" {
+		http.Error(w, "sync already in progress", http.StatusConflict)
+		return
+	}
+
+	syncStartedAt := time.Now()
+	if err := h.Registry.UpdateStatus(app.ID, "syncing", &syncStartedAt); err != nil && h.Logger != nil {
 		h.Logger.Warn("Failed to mark app syncing", "id", app.ID, "error", err)
 	}
 
@@ -175,7 +188,21 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 	syncCtx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
-	if _, err := h.Applier.Apply(syncCtx, app.ID, "", nil, app.RepoURL, app.Branch, app.ComposePath, "", deployKey); err != nil {
+	progress := newSyncProgressReporter(h.Registry, h.Logger, app.ID, syncProgressFlushInterval)
+	output, err := h.Applier.Apply(
+		syncCtx,
+		app.ID,
+		"",
+		nil,
+		app.RepoURL,
+		app.Branch,
+		app.ComposePath,
+		"",
+		deployKey,
+		progress.Update,
+	)
+	progress.Flush()
+	if err != nil {
 		now := time.Now()
 		_ = h.Registry.UpdateSyncResult(
 			app.ID,
@@ -183,7 +210,7 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 			now,
 			app.LastSyncedCommit,
 			app.LastSyncedCommitMessage,
-			"",
+			output,
 			err.Error(),
 		)
 		if h.Logger != nil {
@@ -200,7 +227,7 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 		now,
 		app.LastSeenCommit,
 		app.LastSeenCommitMessage,
-		"Manual sync completed.",
+		output,
 		"",
 	); err != nil && h.Logger != nil {
 		h.Logger.Warn("Failed to update sync status after force sync", "id", app.ID, "error", err)

@@ -119,7 +119,12 @@ func (r *Reconciler) reconcileOnce() {
 	apps := r.Registry.List()
 	for _, app := range apps {
 		if app.Status == "syncing" {
-			r.requeuePending(app, "recovering_interrupted_sync")
+			if r.syncLooksStale(app) {
+				r.requeuePending(app, "recovering_interrupted_sync")
+			} else {
+				// Skip apps with an active in-flight sync.
+				continue
+			}
 		}
 
 		if app.LastSeenCommit == "" {
@@ -192,8 +197,24 @@ func (r *Reconciler) requeuePending(app *App, reason string) {
 	}
 }
 
+func (r *Reconciler) syncLooksStale(app *App) bool {
+	if app == nil {
+		return true
+	}
+	if app.LastSyncAt.IsZero() {
+		return true
+	}
+
+	staleAfter := r.Config.SyncTimeout + 30*time.Second
+	if staleAfter <= 0 {
+		staleAfter = 5*time.Minute + 30*time.Second
+	}
+	return time.Since(app.LastSyncAt) > staleAfter
+}
+
 func (r *Reconciler) syncApp(app *App) error {
-	if err := r.Registry.UpdateStatus(app.ID, "syncing", nil); err != nil && r.Logger != nil {
+	syncStartedAt := time.Now()
+	if err := r.Registry.UpdateStatus(app.ID, "syncing", &syncStartedAt); err != nil && r.Logger != nil {
 		r.Logger.Warn("Failed to mark app syncing", "app_id", app.ID, "error", err)
 	}
 
@@ -207,7 +228,20 @@ func (r *Reconciler) syncApp(app *App) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.Config.SyncTimeout)
 	defer cancel()
 
-	output, err := r.Executor.Apply(ctx, app.ID, "", nil, app.RepoURL, app.Branch, app.ComposePath, app.LastSeenCommit, deployKey)
+	progress := newSyncProgressReporter(r.Registry, r.Logger, app.ID, syncProgressFlushInterval)
+	output, err := r.Executor.Apply(
+		ctx,
+		app.ID,
+		"",
+		nil,
+		app.RepoURL,
+		app.Branch,
+		app.ComposePath,
+		app.LastSeenCommit,
+		deployKey,
+		progress.Update,
+	)
+	progress.Flush()
 	if err != nil {
 		if r.Logger != nil {
 			r.Logger.Error("Sync apply failed", "app_id", app.ID, "commit", app.LastSeenCommit, "output", truncateOutput(output))

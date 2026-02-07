@@ -349,6 +349,30 @@ func (s *SQLiteStore) UpdateAppSyncResult(
 	return nil
 }
 
+func (s *SQLiteStore) UpdateAppSyncProgress(ctx context.Context, id string, lastSyncAt time.Time, syncOutput string) error {
+	query := `
+	UPDATE apps
+	SET
+		status = ?,
+		last_sync_at = ?,
+		last_sync_output = ?,
+		last_sync_error = ''
+	WHERE id = ?
+	`
+	result, err := s.db.ExecContext(ctx, query, "syncing", lastSyncAt, syncOutput, id)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("app not found")
+	}
+	return nil
+}
+
 func (s *SQLiteStore) UpdateAppStatus(ctx context.Context, id, status string, lastSyncAt *time.Time) error {
 	if lastSyncAt == nil {
 		query := `UPDATE apps SET status = ? WHERE id = ?`
