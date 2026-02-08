@@ -194,19 +194,31 @@ func (e *ComposeExecutor) buildDockerResolution(ctx context.Context) (dockerComm
 }
 
 func (e *ComposeExecutor) ensureComposeAvailable(ctx context.Context, dockerPath string) (string, map[string]string, error) {
-	version, err := probeComposeVersion(ctx, dockerPath, nil)
-	if err == nil {
-		return version, nil, nil
+	version, versionErr := probeComposeVersion(ctx, dockerPath, nil)
+	if versionErr == nil {
+		daemonErr := probeComposeDaemonCompatibility(ctx, dockerPath, nil)
+		if daemonErr == nil {
+			return version, nil, nil
+		}
+		if !looksLikeDockerAPIMismatch(daemonErr) {
+			return "", nil, fmt.Errorf("docker compose daemon compatibility check failed: %w", daemonErr)
+		}
 	}
 
 	installEnv, installErr := e.installComposePlugin(ctx, true)
 	if installErr != nil {
-		return "", nil, fmt.Errorf("docker compose plugin unavailable and install failed: %w", installErr)
+		if versionErr != nil {
+			return "", nil, fmt.Errorf("docker compose plugin unavailable and install failed: %w", installErr)
+		}
+		return "", nil, fmt.Errorf("docker compose plugin is incompatible with daemon and refresh failed: %w", installErr)
 	}
 
-	version, err = probeComposeVersion(ctx, dockerPath, installEnv)
-	if err != nil {
-		return "", nil, fmt.Errorf("docker compose plugin check failed after install: %w", err)
+	version, versionErr = probeComposeVersion(ctx, dockerPath, installEnv)
+	if versionErr != nil {
+		return "", nil, fmt.Errorf("docker compose plugin check failed after install: %w", versionErr)
+	}
+	if daemonErr := probeComposeDaemonCompatibility(ctx, dockerPath, installEnv); daemonErr != nil {
+		return "", nil, fmt.Errorf("docker compose daemon compatibility check failed after install: %w", daemonErr)
 	}
 	return version, installEnv, nil
 }
@@ -565,6 +577,19 @@ func probeComposeVersion(ctx context.Context, dockerPath string, envVars map[str
 	return line, nil
 }
 
+func probeComposeDaemonCompatibility(ctx context.Context, dockerPath string, envVars map[string]string) error {
+	output, err := runCommandCapture(ctx, dockerPath, []string{"compose", "ls", "--all"}, envVars)
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(output))
+	}
+	// Some compose versions exit 0 but print API mismatch warnings to
+	// combined output. Catch those so we can trigger a plugin upgrade.
+	if outputLooksLikeDockerAPIMismatch(output) {
+		return fmt.Errorf("compose plugin reported API mismatch: %s", strings.TrimSpace(output))
+	}
+	return nil
+}
+
 func fetchLatestComposeRelease(ctx context.Context) (composeRelease, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dockerComposeReleasesAPI, nil)
 	if err != nil {
@@ -829,6 +854,31 @@ func fallbackValue(value string) string {
 		return "unknown"
 	}
 	return trimmed
+}
+
+func looksLikeDockerAPIMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	return outputLooksLikeDockerAPIMismatch(err.Error())
+}
+
+func outputLooksLikeDockerAPIMismatch(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "client version") &&
+		strings.Contains(lower, "minimum supported api version")
+}
+
+// forceRefreshComposePlugin installs the latest compose plugin and invalidates
+// the cached docker resolution so the next command picks it up.
+func (e *ComposeExecutor) forceRefreshComposePlugin(ctx context.Context) error {
+	e.toolchainMu.Lock()
+	e.dockerResolution = dockerCommandResolution{}
+	e.resolutionAt = time.Time{}
+	e.toolchainMu.Unlock()
+
+	_, err := e.installComposePlugin(ctx, true)
+	return err
 }
 
 func mergeCommandEnv(base, extra map[string]string) map[string]string {

@@ -558,15 +558,65 @@ func (e *ComposeExecutor) runCommand(
 	env map[string]string,
 	onOutput func(string),
 ) (string, error) {
-	if cmd == "docker" {
+	isDocker := cmd == "docker"
+	callerEnv := env
+
+	if isDocker {
 		resolution, err := e.resolveDockerCommand(ctx)
 		if err != nil {
 			return "", err
 		}
 		cmd = resolution.Path
-		env = mergeCommandEnv(env, resolution.Env)
+		env = mergeCommandEnv(callerEnv, resolution.Env)
 	}
 
+	output, err := e.execProcess(ctx, cmd, args, workDir, env, onOutput)
+
+	// If a docker/compose command failed because the compose plugin's
+	// embedded API version is older than the daemon's minimum, upgrade the
+	// plugin and retry the command once. This covers the edge-case where
+	// probeComposeDaemonCompatibility passes (e.g. "compose ls" exits 0)
+	// but heavier operations like "compose pull" are rejected.
+	if err != nil && isDocker && outputLooksLikeDockerAPIMismatch(output) {
+		e.Logger.Warn(
+			"Docker compose API version mismatch detected, upgrading plugin and retrying",
+			"original_cmd", formatCommand(cmd, args),
+		)
+		if refreshErr := e.forceRefreshComposePlugin(ctx); refreshErr != nil {
+			e.Logger.Error("Compose plugin upgrade failed", "error", refreshErr)
+			return output, err
+		}
+		resolution, resErr := e.resolveDockerCommand(ctx)
+		if resErr != nil {
+			e.Logger.Error("Docker re-resolution failed after compose upgrade", "error", resErr)
+			return output, err
+		}
+		if onOutput != nil {
+			onOutput("\n--- compose plugin upgraded, retrying command ---\n")
+		}
+		return e.execProcess(
+			ctx,
+			resolution.Path,
+			args,
+			workDir,
+			mergeCommandEnv(callerEnv, resolution.Env),
+			onOutput,
+		)
+	}
+
+	return output, err
+}
+
+// execProcess runs a single process, streams output through the callback,
+// and returns the combined output.
+func (e *ComposeExecutor) execProcess(
+	ctx context.Context,
+	cmd string,
+	args []string,
+	workDir string,
+	env map[string]string,
+	onOutput func(string),
+) (string, error) {
 	start := time.Now()
 	command := exec.CommandContext(ctx, cmd, args...)
 	command.Dir = workDir
