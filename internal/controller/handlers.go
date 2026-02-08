@@ -185,7 +185,11 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 	}
 	defer zeroBytes(deployKey)
 
-	syncCtx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	// Derive from Background so the sync survives reverse-proxy or client
+	// disconnects. The reconciler already does this; match that behaviour
+	// and honour the same configurable timeout (default 5m, override with
+	// CONOPS_SYNC_TIMEOUT).
+	syncCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	progress := newSyncProgressReporter(h.Registry, h.Logger, app.ID, syncProgressFlushInterval)
