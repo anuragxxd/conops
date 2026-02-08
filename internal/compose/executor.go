@@ -205,7 +205,7 @@ func (e *ComposeExecutor) Apply(
 		ctx,
 		&syncLog,
 		"docker",
-		[]string{"compose", "-p", projectName, "-f", composeFileName, "up", "-d", "--remove-orphans"},
+		[]string{"compose", "-p", projectName, "-f", composeFileName, "up", "-d", "--remove-orphans", "--build"},
 		composeDir,
 		envVars,
 		onProgress,
