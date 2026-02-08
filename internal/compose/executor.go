@@ -20,8 +20,13 @@ import (
 
 // ComposeExecutor handles Docker Compose operations.
 type ComposeExecutor struct {
-	WorkDir string
-	Logger  *slog.Logger
+	WorkDir  string
+	ToolsDir string
+	Logger   *slog.Logger
+
+	toolchainMu      sync.Mutex
+	dockerResolution dockerCommandResolution
+	resolutionAt     time.Time
 }
 
 // ProjectRuntimeState summarizes runtime state for one compose project.
@@ -43,8 +48,9 @@ func (s ProjectRuntimeState) IsHealthy() bool {
 // NewComposeExecutor creates a new executor.
 func NewComposeExecutor(logger *slog.Logger) *ComposeExecutor {
 	return &ComposeExecutor{
-		WorkDir: "./.conops-runtime",
-		Logger:  logger,
+		WorkDir:  "./.conops-runtime",
+		ToolsDir: "./.conops-tools",
+		Logger:   logger,
 	}
 }
 
@@ -105,6 +111,19 @@ func (e *ComposeExecutor) Apply(
 		appendLogLine(&syncLog, fmt.Sprintf("target_commit: %s", commitHash))
 	} else {
 		appendLogLine(&syncLog, "target_commit: latest on branch")
+	}
+	emitProgress()
+
+	appendLogSection(&syncLog, "Docker preflight")
+	preflight, err := e.ensureDockerPreflight(ctx)
+	if err != nil {
+		appendLogLine(&syncLog, "failed")
+		appendLogLine(&syncLog, err.Error())
+		emitProgress()
+		return strings.TrimSpace(syncLog.String()), fmt.Errorf("docker preflight failed: %w", err)
+	}
+	for _, line := range preflight.LogLines() {
+		appendLogLine(&syncLog, line)
 	}
 	emitProgress()
 
@@ -539,6 +558,15 @@ func (e *ComposeExecutor) runCommand(
 	env map[string]string,
 	onOutput func(string),
 ) (string, error) {
+	if cmd == "docker" {
+		resolution, err := e.resolveDockerCommand(ctx)
+		if err != nil {
+			return "", err
+		}
+		cmd = resolution.Path
+		env = mergeCommandEnv(env, resolution.Env)
+	}
+
 	start := time.Now()
 	command := exec.CommandContext(ctx, cmd, args...)
 	command.Dir = workDir

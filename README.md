@@ -39,7 +39,7 @@ ConOps is a single controller that continuously reconciles your Docker Compose a
 
 1. **You register an app** &mdash; a Git repo, a branch, and a path to a compose file.
 2. **ConOps polls the branch** &mdash; when it sees a new commit, it marks the app as pending.
-3. **The reconciler kicks in** &mdash; it clones/fetches the repo, runs `docker compose pull` and `docker compose up -d --remove-orphans`.
+3. **The reconciler kicks in** &mdash; it runs Docker preflight, then clones/fetches the repo, runs `docker compose pull`, and runs `docker compose up -d --remove-orphans`.
 4. **Drift detection runs continuously** &mdash; if a container crashes, exits, or goes unhealthy, ConOps re-deploys automatically.
 
 You get a web dashboard for visibility and a REST API for automation.
@@ -49,6 +49,7 @@ You get a web dashboard for visibility and a REST API for automation.
 - **Git-driven deployments** &mdash; push to your branch, ConOps handles the rest
 - **Continuous reconciliation** &mdash; configurable loop that keeps desired state in sync
 - **Self-healing** &mdash; detects missing, exited, or unhealthy containers and recovers
+- **Docker preflight + fallback toolchain** &mdash; checks Docker API compatibility before sync and auto-installs compatible tooling when needed
 - **Web UI** &mdash; register apps, inspect status, view containers, trigger syncs, read logs
 - **REST API + CLI** &mdash; automate everything; nothing in the UI that the API can't do
 - **Private repo support** &mdash; GitHub deploy keys with AES-GCM encryption at rest
@@ -79,6 +80,9 @@ enable that.
 `CONOPS_RUNTIME_DIR` is important when ConOps runs in Docker and talks to the
 host daemon through `/var/run/docker.sock`. Use a host bind-mounted absolute
 path so Compose bind mounts and file-based secrets resolve correctly.
+
+ConOps runs Docker preflight before each sync. If the system Docker client is
+too old, ConOps can auto-install a compatible Docker CLI and Compose plugin.
 
 Open **http://localhost:8080** and register your first app.
 
@@ -162,6 +166,10 @@ All configuration is via environment variables.
 | `CONOPS_SYNC_TIMEOUT` | `5m` | Max duration for a single sync operation |
 | `CONOPS_RETRY_ERRORS` | `false` | Auto-retry apps that entered `error` status |
 | `CONOPS_RUNTIME_DIR` | `./.conops-runtime` | Runtime checkout directory used for compose execution |
+| `CONOPS_TOOLS_DIR` | `./.conops-tools` | Cache directory for managed Docker CLI and Compose plugin downloads |
+| `CONOPS_DOCKER_CLI_PATH` | &mdash; | Advanced: absolute path to a pre-installed Docker CLI binary |
+| `CONOPS_DOCKER_CLI_VERSION` | &mdash; | Advanced: pin managed Docker CLI version (for example `29.2.1`) |
+| `CONOPS_COMPOSE_PLUGIN_VERSION` | &mdash; | Advanced: pin managed Compose plugin version (for example `v5.0.2`) |
 | `CONOPS_ENCRYPTION_KEY` | &mdash; | 32-byte key (raw or base64) for deploy key encryption |
 | `CONOPS_ENCRYPTION_KEY_FILE` | `/data/conops-encryption.key` | Path to read/write the encryption key |
 | `CONOPS_KNOWN_HOSTS_FILE` | auto | SSH known_hosts file for host verification |

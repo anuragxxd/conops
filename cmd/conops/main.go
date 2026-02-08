@@ -79,7 +79,12 @@ func main() {
 	if runtimeDir := strings.TrimSpace(os.Getenv("CONOPS_RUNTIME_DIR")); runtimeDir != "" {
 		executor.WorkDir = runtimeDir
 	}
-	logger.Info("Runtime workspace configured", "dir", executor.WorkDir)
+	if toolsDir := strings.TrimSpace(os.Getenv("CONOPS_TOOLS_DIR")); toolsDir != "" {
+		executor.ToolsDir = toolsDir
+	} else if dataDir != "." {
+		executor.ToolsDir = filepath.Join(dataDir, "conops-tools")
+	}
+	logger.Info("Runtime workspace configured", "dir", executor.WorkDir, "tools_dir", executor.ToolsDir)
 	reconciler := controller.NewReconciler(registry, executor, logger, reconcilerCfg)
 	go reconciler.Run(ctx)
 
