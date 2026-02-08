@@ -72,19 +72,16 @@ docker run \
   anurag1201/conops:latest
 ```
 
-This uses SQLite by default. SQLite is fine for daily use, but we recommend
+Open **http://localhost:8080** and register your first app.
+
+> **Persistence:** This uses SQLite by default. SQLite is fine for daily use, but we recommend
 PostgreSQL for production. You can pass the Postgres environment variables
 (`DB_TYPE=postgres` and `DB_CONNECTION_STRING=postgres://...`) to ConOps to
-enable that.
+enable that. 
 
-`CONOPS_RUNTIME_DIR` is important when ConOps runs in Docker and talks to the
+> **Docker Runtime:** `CONOPS_RUNTIME_DIR` is important when ConOps runs in Docker and talks to the
 host daemon through `/var/run/docker.sock`. Use a host bind-mounted absolute
 path so Compose bind mounts and file-based secrets resolve correctly.
-
-ConOps runs Docker preflight before each sync. If the system Docker client is
-too old, ConOps can auto-install a compatible Docker CLI and Compose plugin.
-
-Open **http://localhost:8080** and register your first app.
 
 ### Register your first app
 
@@ -152,7 +149,7 @@ curl -X POST http://localhost:8080/api/v1/apps/ \
   }'
 ```
 
-Deploy keys are encrypted at rest using AES-GCM. ConOps auto-generates an encryption key on first run, or you can provide your own via `CONOPS_ENCRYPTION_KEY`. Strict SSH host verification is enforced.
+> **Security:** Deploy keys are encrypted at rest using AES-GCM. ConOps auto-generates an encryption key on first run, or you can provide your own via `CONOPS_ENCRYPTION_KEY`. Strict SSH host verification is enforced.
 
 ## Configuration
 
