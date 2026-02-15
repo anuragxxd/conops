@@ -261,6 +261,26 @@ func (s *PostgresStore) DeleteApp(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *PostgresStore) UpdateApp(ctx context.Context, id, name, branch, composePath, pollInterval string) error {
+	query := `
+	UPDATE apps
+	SET
+		name = $1,
+		branch = $2,
+		compose_path = $3,
+		poll_interval = $4
+	WHERE id = $5
+	`
+	ct, err := s.pool.Exec(ctx, query, name, branch, composePath, pollInterval, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("app not found")
+	}
+	return nil
+}
+
 func (s *PostgresStore) UpsertAppCredential(ctx context.Context, credential *AppCredential) error {
 	query := `
 	INSERT INTO app_credentials (app_id, deploy_key_ciphertext, deploy_key_nonce, env_ciphertext, env_nonce)
@@ -281,7 +301,7 @@ func (s *PostgresStore) GetAppCredential(ctx context.Context, id string) (*AppCr
 
 	credential := &AppCredential{}
 	var deployKeyCiphertext, deployKeyNonce, envCiphertext, envNonce []byte
-	
+
 	if err := row.Scan(&credential.AppID, &deployKeyCiphertext, &deployKeyNonce, &envCiphertext, &envNonce); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrCredentialNotFound
@@ -292,13 +312,31 @@ func (s *PostgresStore) GetAppCredential(ctx context.Context, id string) (*AppCr
 	credential.DeployKeyNonce = deployKeyNonce
 	credential.EnvCiphertext = envCiphertext
 	credential.EnvNonce = envNonce
-	
+
 	return credential, nil
 }
 
 func (s *PostgresStore) DeleteAppCredential(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM app_credentials WHERE app_id = $1`, id)
 	return err
+}
+
+func (s *PostgresStore) UpdateAppCredentials(ctx context.Context, appID string, envCiphertext, envNonce []byte) error {
+	query := `
+	UPDATE app_credentials
+	SET
+		env_ciphertext = $1,
+		env_nonce = $2
+	WHERE app_id = $3
+	`
+	ct, err := s.pool.Exec(ctx, query, envCiphertext, envNonce, appID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("app credentials not found")
+	}
+	return nil
 }
 
 func (s *PostgresStore) UpdateAppCommit(ctx context.Context, id, commitHash, commitMessage string) error {

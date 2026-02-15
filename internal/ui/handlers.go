@@ -76,13 +76,14 @@ type AppDetailView struct {
 
 // AppFormData is the view model for the new app form.
 type AppFormData struct {
-	Name        string
-	RepoURL     string
-	RepoAuth    string
-	DeployKey   string
-	Branch      string
-	ComposePath string
-	ServiceEnvs map[string]string
+	Name         string
+	RepoURL      string
+	RepoAuth     string
+	DeployKey    string
+	Branch       string
+	ComposePath  string
+	PollInterval string
+	ServiceEnvs  map[string]string
 }
 
 // AppsPageData is the data passed to the apps page template.
@@ -151,6 +152,42 @@ func (h *Handler) ServeAppDetailPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ServeEditAppPage handles the app edit page.
+func (h *Handler) ServeEditAppPage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	app, err := h.Registry.Get(id)
+	if err != nil {
+		http.Error(w, "App not found", http.StatusNotFound)
+		return
+	}
+
+	// Load existing environment variables
+	envVars, err := h.Registry.GetAppEnvs(id)
+	if err != nil {
+		http.Error(w, "Failed to load app environment variables", http.StatusInternalServerError)
+		return
+	}
+
+	data := AppsPageData{
+		Page: "edit",
+		Form: AppFormData{
+			Name:         app.Name,
+			RepoURL:      app.RepoURL,
+			RepoAuth:     app.RepoAuthMethod,
+			Branch:       app.Branch,
+			ComposePath:  app.ComposePath,
+			PollInterval: app.PollInterval,
+			ServiceEnvs:  envVars,
+		},
+		App: AppDetailView{
+			ID: app.ID,
+		},
+	}
+	if err := h.Tmpl.ExecuteTemplate(w, "base", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // ServeAppDetailFragment handles HTMX refresh requests for app details.
 func (h *Handler) ServeAppDetailFragment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -190,6 +227,68 @@ func (h *Handler) ServeAppsFragment(w http.ResponseWriter, r *http.Request) {
 	if err := h.Tmpl.ExecuteTemplate(w, "apps-list", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// HandleEditApp processes the form submission to edit an existing app.
+func (h *Handler) HandleEditApp(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	app, err := h.Registry.Get(id)
+	if err != nil {
+		http.Error(w, "App not found", http.StatusNotFound)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	form := AppFormData{
+		Name:        strings.TrimSpace(r.FormValue("name")),
+		RepoURL:     app.RepoURL,        // RepoURL is not editable
+		RepoAuth:    app.RepoAuthMethod, // RepoAuth is not editable
+		Branch:      strings.TrimSpace(r.FormValue("branch")),
+		ComposePath: strings.TrimSpace(r.FormValue("compose_path")),
+		ServiceEnvs: make(map[string]string),
+	}
+
+	// Parse poll_interval
+	pollInterval := strings.TrimSpace(r.FormValue("poll_interval"))
+	if pollInterval == "" {
+		pollInterval = "30s"
+	}
+
+	// Parse service env vars from the form
+	for key, values := range r.Form {
+		if strings.HasPrefix(key, "service_env_") && len(values) > 0 {
+			serviceName := strings.TrimSpace(strings.TrimPrefix(key, "service_env_"))
+			if serviceName != "" {
+				form.ServiceEnvs[serviceName] = values[len(values)-1]
+			}
+		}
+	}
+
+	// Set defaults if missing
+	if form.Branch == "" {
+		form.Branch = "main"
+	}
+	if form.ComposePath == "" {
+		form.ComposePath = "compose.yaml"
+	}
+
+	if form.Name == "" {
+		h.renderEditAppPage(w, http.StatusBadRequest, id, form, "Name is required.")
+		return
+	}
+
+	// Update the app
+	if err := h.Registry.UpdateApp(id, form.Name, form.Branch, form.ComposePath, pollInterval, form.ServiceEnvs); err != nil {
+		h.renderEditAppPage(w, http.StatusConflict, id, form, err.Error())
+		return
+	}
+
+	http.Redirect(w, r, "/ui/apps/"+id, http.StatusSeeOther)
 }
 
 // HandleAddApp processes the form submission to add a new app.
@@ -287,6 +386,21 @@ func (h *Handler) renderNewAppPage(w http.ResponseWriter, statusCode int, form A
 		Page:  "new",
 		Form:  form,
 		Error: errorMessage,
+	}
+	if err := h.Tmpl.ExecuteTemplate(w, "base", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (h *Handler) renderEditAppPage(w http.ResponseWriter, statusCode int, appID string, form AppFormData, errorMessage string) {
+	w.WriteHeader(statusCode)
+	data := AppsPageData{
+		Page:  "edit",
+		Form:  form,
+		Error: errorMessage,
+		App: AppDetailView{
+			ID: appID,
+		},
 	}
 	if err := h.Tmpl.ExecuteTemplate(w, "base", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

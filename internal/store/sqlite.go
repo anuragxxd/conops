@@ -85,7 +85,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if _, err := db.Exec(credentialsQuery); err != nil {
 		return nil, fmt.Errorf("failed to create app_credentials table: %w", err)
 	}
-	
+
 	// Add env_ciphertext and env_nonce columns to app_credentials
 	if err := addSQLiteColumnIfMissing(db, "app_credentials", "env_ciphertext BLOB"); err != nil {
 		return nil, err
@@ -267,6 +267,30 @@ func (s *SQLiteStore) DeleteApp(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
+func (s *SQLiteStore) UpdateApp(ctx context.Context, id, name, branch, composePath, pollInterval string) error {
+	query := `
+	UPDATE apps
+	SET
+		name = ?,
+		branch = ?,
+		compose_path = ?,
+		poll_interval = ?
+	WHERE id = ?
+	`
+	result, err := s.db.ExecContext(ctx, query, name, branch, composePath, pollInterval, id)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("app not found")
+	}
+	return nil
+}
+
 func (s *SQLiteStore) UpsertAppCredential(ctx context.Context, credential *AppCredential) error {
 	query := `
 	INSERT INTO app_credentials (app_id, deploy_key_ciphertext, deploy_key_nonce, env_ciphertext, env_nonce)
@@ -294,7 +318,7 @@ func (s *SQLiteStore) GetAppCredential(ctx context.Context, id string) (*AppCred
 		}
 		return nil, err
 	}
-	
+
 	credential.DeployKeyCiphertext = deployKeyCiphertext
 	credential.DeployKeyNonce = deployKeyNonce
 	credential.EnvCiphertext = envCiphertext
@@ -306,6 +330,28 @@ func (s *SQLiteStore) GetAppCredential(ctx context.Context, id string) (*AppCred
 func (s *SQLiteStore) DeleteAppCredential(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM app_credentials WHERE app_id = ?`, id)
 	return err
+}
+
+func (s *SQLiteStore) UpdateAppCredentials(ctx context.Context, appID string, envCiphertext, envNonce []byte) error {
+	query := `
+	UPDATE app_credentials
+	SET
+		env_ciphertext = ?,
+		env_nonce = ?
+	WHERE app_id = ?
+	`
+	result, err := s.db.ExecContext(ctx, query, envCiphertext, envNonce, appID)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("app credentials not found")
+	}
+	return nil
 }
 
 func (s *SQLiteStore) UpdateAppCommit(ctx context.Context, id, commitHash, commitMessage string) error {

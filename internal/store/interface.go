@@ -16,9 +16,11 @@ type Store interface {
 	GetApp(ctx context.Context, id string) (*api.App, error)
 	ListApps(ctx context.Context) ([]*api.App, error)
 	DeleteApp(ctx context.Context, id string) error
+	UpdateApp(ctx context.Context, id, name, branch, composePath, pollInterval string) error
 	UpsertAppCredential(ctx context.Context, credential *AppCredential) error
 	GetAppCredential(ctx context.Context, id string) (*AppCredential, error)
 	DeleteAppCredential(ctx context.Context, id string) error
+	UpdateAppCredentials(ctx context.Context, appID string, envCiphertext, envNonce []byte) error
 	UpdateAppCommit(ctx context.Context, id, commitHash, commitMessage string) error
 	UpdateAppStatus(ctx context.Context, id, status string, lastSyncAt *time.Time) error
 	UpdateAppSyncResult(

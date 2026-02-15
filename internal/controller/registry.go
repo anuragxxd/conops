@@ -63,7 +63,7 @@ func (r *Registry) AddWithDeployKeyAndEnvs(app *api.App, deployKey string, servi
 	// Check encryption support if sensitive data is provided
 	hasDeployKey := app.RepoAuthMethod == repoauth.MethodDeployKey
 	hasEnvVars := len(serviceEnvs) > 0
-	
+
 	if (hasDeployKey || hasEnvVars) && (r.credentials == nil || !r.credentials.Enabled()) {
 		return fmt.Errorf("encryption support is unavailable: set %s", credentials.EncryptionKeyEnv)
 	}
@@ -161,6 +161,86 @@ func (r *Registry) Delete(id string) error {
 		return err
 	}
 	return r.store.DeleteApp(context.Background(), id)
+}
+
+// UpdateApp updates an application's editable fields and optionally its environment variables.
+func (r *Registry) UpdateApp(id, name, branch, composePath, pollInterval string, serviceEnvs map[string]string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("app id is required")
+	}
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("app name is required")
+	}
+	if strings.TrimSpace(branch) == "" {
+		return fmt.Errorf("branch is required")
+	}
+	if strings.TrimSpace(composePath) == "" {
+		return fmt.Errorf("compose path is required")
+	}
+	if strings.TrimSpace(pollInterval) == "" {
+		return fmt.Errorf("poll interval is required")
+	}
+
+	// Verify app exists
+	if _, err := r.store.GetApp(context.Background(), id); err != nil {
+		return fmt.Errorf("app not found: %w", err)
+	}
+
+	// Update app fields
+	if err := r.store.UpdateApp(context.Background(), id, name, branch, composePath, pollInterval); err != nil {
+		return fmt.Errorf("failed to update app: %w", err)
+	}
+
+	// Update environment variables if provided
+	if serviceEnvs != nil {
+		hasEnvVars := len(serviceEnvs) > 0
+
+		if hasEnvVars && (r.credentials == nil || !r.credentials.Enabled()) {
+			return fmt.Errorf("encryption support is unavailable: set %s", credentials.EncryptionKeyEnv)
+		}
+
+		if hasEnvVars {
+			// Serialize and encrypt env vars
+			jsonBytes, err := json.Marshal(serviceEnvs)
+			if err != nil {
+				return fmt.Errorf("failed to serialize env vars: %w", err)
+			}
+			defer zeroBytes(jsonBytes)
+
+			ciphertext, nonce, err := r.credentials.Encrypt(jsonBytes)
+			if err != nil {
+				return fmt.Errorf("failed to encrypt env vars: %w", err)
+			}
+
+			// Check if credentials exist
+			_, err = r.store.GetAppCredential(context.Background(), id)
+			if err != nil {
+				if errors.Is(err, store.ErrCredentialNotFound) {
+					// Create new credential entry with only env vars
+					cred := &store.AppCredential{
+						AppID:         id,
+						EnvCiphertext: ciphertext,
+						EnvNonce:      nonce,
+					}
+					if err := r.store.UpsertAppCredential(context.Background(), cred); err != nil {
+						return fmt.Errorf("failed to create app credentials: %w", err)
+					}
+				} else {
+					return fmt.Errorf("failed to check credentials: %w", err)
+				}
+			} else {
+				// Update existing credentials
+				if err := r.store.UpdateAppCredentials(context.Background(), id, ciphertext, nonce); err != nil {
+					return fmt.Errorf("failed to update app credentials: %w", err)
+				}
+			}
+		} else {
+			// Clear env vars by updating to empty
+			_ = r.store.UpdateAppCredentials(context.Background(), id, nil, nil)
+		}
+	}
+
+	return nil
 }
 
 // GetAppEnvs returns the decrypted environment variables for the app.

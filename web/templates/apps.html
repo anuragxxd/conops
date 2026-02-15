@@ -171,6 +171,165 @@
         }
     </script>
 </section>
+{{else if eq .Page "edit"}}
+<section class="space-y-4">
+    <a href="/ui/apps/{{.App.ID}}" class="link link-hover text-sm text-base-content/70">Back to app</a>
+    <article class="card bg-base-100 border border-base-300 shadow-sm">
+    <div class="card-body gap-4">
+        <div>
+            <h1 class="text-3xl font-semibold tracking-tight">Edit application</h1>
+            <p class="text-base-content/70 mt-1">Update application configuration. Changes to branch, compose path, or environment variables will trigger a sync.</p>
+        </div>
+        
+    {{if .Error}}
+    <div role="alert" class="alert alert-error alert-soft">
+      <span>{{.Error}}</span>
+    </div>
+    {{end}}
+
+    <div role="alert" class="alert alert-warning alert-soft">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+        <span>Changing branch, compose path, or environment variables will trigger an automatic sync and may restart running services.</span>
+    </div>
+
+    <form method="post" action="/ui/apps/{{.App.ID}}/edit" class="space-y-4" onsubmit="return validateEnvVars()">
+        <div class="form-control">
+            <label for="name">App name</label>
+            <input class="input input-bordered w-full" type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="For example, Payments API">
+        </div>
+
+        <div class="form-control">
+            <label for="repo_url">Git repository URL</label>
+            <input class="input input-bordered w-full bg-base-200" type="text" id="repo_url" name="repo_url" value="{{.Form.RepoURL}}" disabled>
+            <div class="label"><span class="label-text-alt text-base-content/70">Repository URL cannot be changed. Delete and recreate the app to use a different repository.</span></div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="form-control">
+            <label for="repo_auth_method">Repository access</label>
+            <select class="select select-bordered w-full bg-base-200" id="repo_auth_method" name="repo_auth_method" disabled>
+                <option value="public" {{if eq .Form.RepoAuth "public"}}selected{{end}}>Public repository</option>
+                <option value="deploy_key" {{if eq .Form.RepoAuth "deploy_key"}}selected{{end}}>Private GitHub (deploy key)</option>
+            </select>
+            <div class="label"><span class="label-text-alt text-base-content/70">Repository access method cannot be changed.</span></div>
+        </div>
+
+        <div class="form-control">
+            <label for="branch">Branch</label>
+            <input class="input input-bordered w-full" type="text" id="branch" name="branch" value="{{.Form.Branch}}" required>
+        </div>
+        </div>
+
+        <div class="form-control">
+            <label for="compose_path">Compose file path</label>
+            <input class="input input-bordered w-full" type="text" id="compose_path" name="compose_path" value="{{.Form.ComposePath}}" required>
+        </div>
+
+        <div class="form-control">
+            <label for="poll_interval">Poll interval</label>
+            <input class="input input-bordered w-full" type="text" id="poll_interval" name="poll_interval" value="{{.Form.PollInterval}}" placeholder="30s" required>
+            <div class="label"><span class="label-text-alt text-base-content/70">How often to check for new commits (e.g., 30s, 1m, 5m)</span></div>
+        </div>
+
+        <div class="card bg-base-100 border border-base-300">
+            <div class="card-body p-4">
+                <h3 class="card-title text-base font-semibold">Environment Variables</h3>
+                <p class="text-xs text-base-content/70">Add environment variables for specific services defined in your compose file.</p>
+                
+                <div id="env-vars-container" class="space-y-4 mt-2">
+                    <!-- Env var rows will be added here -->
+                    {{range $svc, $env := .Form.ServiceEnvs}}
+                    <div class="flex flex-col gap-2 p-3 bg-base-200/50 rounded-lg relative group">
+                        <button type="button" onclick="this.parentElement.remove()" class="btn btn-ghost btn-xs btn-square absolute top-2 right-2 text-error">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                        <div class="form-control w-full">
+                            <label class="label label-text text-xs font-semibold pb-1">Service Name</label>
+                            <input type="text" value="{{$svc}}" data-textarea-id="env_{{$svc}}" oninput="updateEnvName(this)" class="input input-sm input-bordered w-full" placeholder="e.g. web, api, db">
+                        </div>
+                        <div class="form-control w-full">
+                            <label class="label label-text text-xs font-semibold pb-1">Variables (.env format)</label>
+                            <textarea id="env_{{$svc}}" name="service_env_{{$svc}}" class="textarea textarea-bordered textarea-sm w-full font-mono text-xs" rows="3" placeholder="KEY=VALUE">{{$env}}</textarea>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+                
+                <button type="button" onclick="addEnvVarRow()" class="btn btn-sm btn-ghost gap-2 w-full mt-2 border-dashed border-base-content/20">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                    Add Service Environment
+                </button>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2">
+            <a href="/ui/apps/{{.App.ID}}" class="btn btn-outline">Cancel</a>
+            <button type="submit" class="btn btn-primary">Update</button>
+        </div>
+    </form>
+    </div>
+    </article>
+
+    <script>
+        function addEnvVarRow() {
+            const container = document.getElementById('env-vars-container');
+            const id = 'env_' + Date.now();
+            const div = document.createElement('div');
+            div.className = 'flex flex-col gap-2 p-3 bg-base-200/50 rounded-lg relative group animate-in fade-in zoom-in duration-200';
+            div.innerHTML = `
+                <button type="button" onclick="this.parentElement.remove()" class="btn btn-ghost btn-xs btn-square absolute top-2 right-2 text-error">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+                <div class="form-control w-full">
+                    <label class="label label-text text-xs font-semibold pb-1">Service Name</label>
+                    <input type="text" data-textarea-id="${id}" oninput="updateEnvName(this)" class="input input-sm input-bordered w-full" placeholder="e.g. web, api, db">
+                </div>
+                <div class="form-control w-full">
+                    <label class="label label-text text-xs font-semibold pb-1">Variables (.env format)</label>
+                    <textarea name="" id="${id}" class="textarea textarea-bordered textarea-sm w-full font-mono text-xs" rows="3" placeholder="KEY=VALUE"></textarea>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function updateEnvName(input) {
+            const targetId = input.getAttribute('data-textarea-id');
+            if (!targetId) {
+                return;
+            }
+            const textarea = document.getElementById(targetId);
+            if (!textarea) {
+                return;
+            }
+            const value = (input.value || '').trim();
+            if (value) {
+                textarea.name = 'service_env_' + value;
+            } else {
+                textarea.name = '';
+            }
+        }
+
+        function validateEnvVars() {
+            const seen = new Set();
+            const inputs = document.querySelectorAll('textarea[name^="service_env_"]');
+            for (const textarea of inputs) {
+                const name = textarea.name || '';
+                const service = name.replace(/^service_env_/, '').trim();
+                if (!service) {
+                    alert('Please provide a service name for each environment entry.');
+                    return false;
+                }
+                const key = service.toLowerCase();
+                if (seen.has(key)) {
+                    alert('Duplicate service name: ' + service);
+                    return false;
+                }
+                seen.add(key);
+            }
+            return true;
+        }
+    </script>
+</section>
 {{else if eq .Page "detail"}}
 {{template "app-detail-live" .}}
 {{end}}

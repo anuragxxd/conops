@@ -107,8 +107,10 @@ func main() {
 		r.Get("/apps/fragment", uiHandler.ServeAppsFragment)
 		r.Get("/apps/{id}", uiHandler.ServeAppDetailPage)
 		r.Get("/apps/{id}/fragment", uiHandler.ServeAppDetailFragment)
+		r.Get("/apps/{id}/edit", uiHandler.ServeEditAppPage)
 		r.Post("/apps", uiHandler.HandleAddApp)
 		r.Post("/apps/add", uiHandler.HandleAddApp)
+		r.Post("/apps/{id}/edit", uiHandler.HandleEditApp)
 		r.Handle("/static/*", http.StripPrefix("/ui/static/", http.FileServer(http.Dir("web/static"))))
 	})
 
@@ -122,6 +124,7 @@ func main() {
 			r.Post("/", appHandler.RegisterApp)
 			r.Get("/", appHandler.ListApps)
 			r.Get("/{id}", appHandler.GetApp)
+			r.Patch("/{id}", appHandler.UpdateApp)
 			r.Post("/{id}/sync", appHandler.ForceSyncApp)
 			r.Delete("/{id}", appHandler.DeleteApp)
 		})
