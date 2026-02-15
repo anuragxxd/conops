@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/anurag1201/conops/stargazers"><img src="https://img.shields.io/github/stars/anurag1201/conops?style=flat-square" alt="GitHub stars"></a>
+  <a href="https://github.com/anuragxxd/conops/stargazers"><img src="https://img.shields.io/github/stars/anuragxxd/conops?style=flat-square" alt="GitHub stars"></a>
   <a href="https://hub.docker.com/r/anurag1201/conops"><img src="https://img.shields.io/docker/pulls/anurag1201/conops?style=flat-square" alt="Docker Pulls"></a>
-  <a href="https://github.com/anurag1201/conops/blob/main/LICENSE"><img src="https://img.shields.io/github/license/anurag1201/conops?style=flat-square" alt="License"></a>
-  <a href="https://github.com/anurag1201/conops/releases"><img src="https://img.shields.io/github/v/release/anurag1201/conops?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/anuragxxd/conops/blob/master/LICENSE"><img src="https://img.shields.io/github/license/anuragxxd/conops?style=flat-square" alt="License"></a>
+  <a href="https://github.com/anuragxxd/conops/releases"><img src="https://img.shields.io/github/v/release/anuragxxd/conops?style=flat-square" alt="Release"></a>
 </p>
 
 <p align="center">
