@@ -82,6 +82,7 @@ type AppFormData struct {
 	DeployKey   string
 	Branch      string
 	ComposePath string
+	ServiceEnvs map[string]string
 }
 
 // AppsPageData is the data passed to the apps page template.
@@ -205,7 +206,22 @@ func (h *Handler) HandleAddApp(w http.ResponseWriter, r *http.Request) {
 		DeployKey:   strings.TrimSpace(r.FormValue("deploy_key")),
 		Branch:      strings.TrimSpace(r.FormValue("branch")),
 		ComposePath: strings.TrimSpace(r.FormValue("compose_path")),
+		ServiceEnvs: make(map[string]string),
 	}
+
+	// Parse service env vars from the form: env_service_X=name and env_value_X=content
+	// This relies on the frontend sending paired inputs.
+	// A simpler approach for standard form submit is to iterate form values.
+	// Assuming format: service_env[service_name] = content
+	for key, values := range r.Form {
+		if strings.HasPrefix(key, "service_env_") && len(values) > 0 {
+			serviceName := strings.TrimSpace(strings.TrimPrefix(key, "service_env_"))
+			if serviceName != "" {
+				form.ServiceEnvs[serviceName] = values[len(values)-1]
+			}
+		}
+	}
+
 	deployKey := form.DeployKey
 	form.DeployKey = ""
 
@@ -232,7 +248,7 @@ func (h *Handler) HandleAddApp(w http.ResponseWriter, r *http.Request) {
 		ComposePath:    form.ComposePath,
 	}
 
-	if err := h.Registry.AddWithDeployKey(app, deployKey); err != nil {
+	if err := h.Registry.AddWithDeployKeyAndEnvs(app, deployKey, form.ServiceEnvs); err != nil {
 		h.renderNewAppPage(w, http.StatusConflict, form, err.Error())
 		return
 	}

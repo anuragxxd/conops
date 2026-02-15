@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -36,8 +37,8 @@ func (r *Registry) Add(app *api.App) error {
 	return r.AddWithDeployKey(app, "")
 }
 
-// AddWithDeployKey registers a new application and stores deploy-key credentials when provided.
-func (r *Registry) AddWithDeployKey(app *api.App, deployKey string) error {
+// AddWithDeployKeyAndEnvs registers a new application with optional deploy key and environment variables.
+func (r *Registry) AddWithDeployKeyAndEnvs(app *api.App, deployKey string, serviceEnvs map[string]string) error {
 	if app == nil {
 		return fmt.Errorf("app is required")
 	}
@@ -59,8 +60,12 @@ func (r *Registry) AddWithDeployKey(app *api.App, deployKey string) error {
 		return err
 	}
 
-	if app.RepoAuthMethod == repoauth.MethodDeployKey && (r.credentials == nil || !r.credentials.Enabled()) {
-		return fmt.Errorf("deploy key support is unavailable: set %s", credentials.EncryptionKeyEnv)
+	// Check encryption support if sensitive data is provided
+	hasDeployKey := app.RepoAuthMethod == repoauth.MethodDeployKey
+	hasEnvVars := len(serviceEnvs) > 0
+	
+	if (hasDeployKey || hasEnvVars) && (r.credentials == nil || !r.credentials.Enabled()) {
+		return fmt.Errorf("encryption support is unavailable: set %s", credentials.EncryptionKeyEnv)
 	}
 
 	// Set defaults if missing
@@ -81,29 +86,58 @@ func (r *Registry) AddWithDeployKey(app *api.App, deployKey string) error {
 		return err
 	}
 
-	if app.RepoAuthMethod != repoauth.MethodDeployKey {
+	// If no credentials to store, return early
+	if !hasDeployKey && !hasEnvVars {
 		return nil
 	}
 
-	plaintext := []byte(deployKey)
-	defer zeroBytes(plaintext)
-
-	ciphertext, nonce, err := r.credentials.Encrypt(plaintext)
-	if err != nil {
-		_ = r.store.DeleteApp(context.Background(), app.ID)
-		return err
+	cred := &store.AppCredential{
+		AppID: app.ID,
 	}
 
-	if err := r.store.UpsertAppCredential(context.Background(), &store.AppCredential{
-		AppID:               app.ID,
-		DeployKeyCiphertext: ciphertext,
-		DeployKeyNonce:      nonce,
-	}); err != nil {
+	if hasDeployKey {
+		plaintext := []byte(deployKey)
+		defer zeroBytes(plaintext)
+
+		ciphertext, nonce, err := r.credentials.Encrypt(plaintext)
+		if err != nil {
+			_ = r.store.DeleteApp(context.Background(), app.ID)
+			return err
+		}
+		cred.DeployKeyCiphertext = ciphertext
+		cred.DeployKeyNonce = nonce
+	}
+
+	if hasEnvVars {
+		// Serialize map to JSON before encryption
+		// We use standard JSON marshalling
+		jsonBytes, err := json.Marshal(serviceEnvs)
+		if err != nil {
+			_ = r.store.DeleteApp(context.Background(), app.ID)
+			return fmt.Errorf("failed to serialize env vars: %w", err)
+		}
+		defer zeroBytes(jsonBytes)
+
+		ciphertext, nonce, err := r.credentials.Encrypt(jsonBytes)
+		if err != nil {
+			_ = r.store.DeleteApp(context.Background(), app.ID)
+			return err
+		}
+		cred.EnvCiphertext = ciphertext
+		cred.EnvNonce = nonce
+	}
+
+	if err := r.store.UpsertAppCredential(context.Background(), cred); err != nil {
 		_ = r.store.DeleteApp(context.Background(), app.ID)
 		return err
 	}
 
 	return nil
+}
+
+// AddWithDeployKey registers a new application and stores deploy-key credentials when provided.
+func (r *Registry) AddWithDeployKey(app *api.App, deployKey string) error {
+	return r.AddWithDeployKeyAndEnvs(app, deployKey, nil)
 }
 
 // Get retrieves an application by ID.
@@ -129,6 +163,38 @@ func (r *Registry) Delete(id string) error {
 	return r.store.DeleteApp(context.Background(), id)
 }
 
+// GetAppEnvs returns the decrypted environment variables for the app.
+func (r *Registry) GetAppEnvs(id string) (map[string]string, error) {
+	credential, err := r.store.GetAppCredential(context.Background(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrCredentialNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if len(credential.EnvCiphertext) == 0 {
+		return nil, nil
+	}
+
+	if r.credentials == nil || !r.credentials.Enabled() {
+		return nil, fmt.Errorf("encryption support is unavailable: set %s", credentials.EncryptionKeyEnv)
+	}
+
+	jsonBytes, err := r.credentials.Decrypt(credential.EnvCiphertext, credential.EnvNonce)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt env vars: %w", err)
+	}
+	defer zeroBytes(jsonBytes)
+
+	var envs map[string]string
+	if err := json.Unmarshal(jsonBytes, &envs); err != nil {
+		return nil, fmt.Errorf("failed to deserialize env vars: %w", err)
+	}
+
+	return envs, nil
+}
+
 // GetDeployKey returns the decrypted deploy key for the app if configured.
 func (r *Registry) GetDeployKey(id string) ([]byte, error) {
 	credential, err := r.store.GetAppCredential(context.Background(), id)
@@ -137,6 +203,10 @@ func (r *Registry) GetDeployKey(id string) ([]byte, error) {
 			return nil, nil
 		}
 		return nil, err
+	}
+
+	if len(credential.DeployKeyCiphertext) == 0 {
+		return nil, nil
 	}
 
 	if r.credentials == nil || !r.credentials.Enabled() {

@@ -78,15 +78,29 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, `ALTER TABLE apps ADD COLUMN IF NOT EXISTS last_sync_error TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+
 	credentialsQuery := `
 	CREATE TABLE IF NOT EXISTS app_credentials (
 		app_id TEXT PRIMARY KEY REFERENCES apps(id) ON DELETE CASCADE,
-		deploy_key_ciphertext BYTEA NOT NULL,
-		deploy_key_nonce BYTEA NOT NULL
+		deploy_key_ciphertext BYTEA,
+		deploy_key_nonce BYTEA,
+		env_ciphertext BYTEA,
+		env_nonce BYTEA
 	);
 	`
-	_, err := s.pool.Exec(ctx, credentialsQuery)
-	return err
+	if _, err := s.pool.Exec(ctx, credentialsQuery); err != nil {
+		return err
+	}
+
+	// Add env_ciphertext and env_nonce to app_credentials for legacy schemas
+	if _, err := s.pool.Exec(ctx, `ALTER TABLE app_credentials ADD COLUMN IF NOT EXISTS env_ciphertext BYTEA`); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `ALTER TABLE app_credentials ADD COLUMN IF NOT EXISTS env_nonce BYTEA`); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *PostgresStore) CreateApp(ctx context.Context, app *api.App) error {
@@ -249,27 +263,36 @@ func (s *PostgresStore) DeleteApp(ctx context.Context, id string) error {
 
 func (s *PostgresStore) UpsertAppCredential(ctx context.Context, credential *AppCredential) error {
 	query := `
-	INSERT INTO app_credentials (app_id, deploy_key_ciphertext, deploy_key_nonce)
-	VALUES ($1, $2, $3)
+	INSERT INTO app_credentials (app_id, deploy_key_ciphertext, deploy_key_nonce, env_ciphertext, env_nonce)
+	VALUES ($1, $2, $3, $4, $5)
 	ON CONFLICT (app_id) DO UPDATE SET
-		deploy_key_ciphertext = EXCLUDED.deploy_key_ciphertext,
-		deploy_key_nonce = EXCLUDED.deploy_key_nonce
+		deploy_key_ciphertext = CASE WHEN EXCLUDED.deploy_key_ciphertext IS NOT NULL THEN EXCLUDED.deploy_key_ciphertext ELSE app_credentials.deploy_key_ciphertext END,
+		deploy_key_nonce = CASE WHEN EXCLUDED.deploy_key_nonce IS NOT NULL THEN EXCLUDED.deploy_key_nonce ELSE app_credentials.deploy_key_nonce END,
+		env_ciphertext = CASE WHEN EXCLUDED.env_ciphertext IS NOT NULL THEN EXCLUDED.env_ciphertext ELSE app_credentials.env_ciphertext END,
+		env_nonce = CASE WHEN EXCLUDED.env_nonce IS NOT NULL THEN EXCLUDED.env_nonce ELSE app_credentials.env_nonce END
 	`
-	_, err := s.pool.Exec(ctx, query, credential.AppID, credential.DeployKeyCiphertext, credential.DeployKeyNonce)
+	_, err := s.pool.Exec(ctx, query, credential.AppID, credential.DeployKeyCiphertext, credential.DeployKeyNonce, credential.EnvCiphertext, credential.EnvNonce)
 	return err
 }
 
 func (s *PostgresStore) GetAppCredential(ctx context.Context, id string) (*AppCredential, error) {
-	query := `SELECT app_id, deploy_key_ciphertext, deploy_key_nonce FROM app_credentials WHERE app_id = $1`
+	query := `SELECT app_id, deploy_key_ciphertext, deploy_key_nonce, env_ciphertext, env_nonce FROM app_credentials WHERE app_id = $1`
 	row := s.pool.QueryRow(ctx, query, id)
 
 	credential := &AppCredential{}
-	if err := row.Scan(&credential.AppID, &credential.DeployKeyCiphertext, &credential.DeployKeyNonce); err != nil {
+	var deployKeyCiphertext, deployKeyNonce, envCiphertext, envNonce []byte
+	
+	if err := row.Scan(&credential.AppID, &deployKeyCiphertext, &deployKeyNonce, &envCiphertext, &envNonce); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrCredentialNotFound
 		}
 		return nil, err
 	}
+	credential.DeployKeyCiphertext = deployKeyCiphertext
+	credential.DeployKeyNonce = deployKeyNonce
+	credential.EnvCiphertext = envCiphertext
+	credential.EnvNonce = envNonce
+	
 	return credential, nil
 }
 

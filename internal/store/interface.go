@@ -40,4 +40,6 @@ type AppCredential struct {
 	AppID               string
 	DeployKeyCiphertext []byte
 	DeployKeyNonce      []byte
+	EnvCiphertext       []byte
+	EnvNonce            []byte
 }

@@ -35,7 +35,7 @@
       <span>{{.Error}}</span>
     </div>
     {{end}}
-    <form method="post" action="/ui/apps" class="space-y-4">
+    <form method="post" action="/ui/apps" class="space-y-4" onsubmit="return validateEnvVars()">
         <div class="form-control">
             <label for="name">App name</label>
             <input class="input input-bordered w-full" type="text" id="name" name="name" value="{{.Form.Name}}" required placeholder="For example, Payments API">
@@ -66,6 +66,37 @@
             <input class="input input-bordered w-full" type="text" id="compose_path" name="compose_path" value="{{.Form.ComposePath}}">
         </div>
 
+        <div class="card bg-base-100 border border-base-300">
+            <div class="card-body p-4">
+                <h3 class="card-title text-base font-semibold">Environment Variables</h3>
+                <p class="text-xs text-base-content/70">Add environment variables for specific services defined in your compose file.</p>
+                
+                <div id="env-vars-container" class="space-y-4 mt-2">
+                    <!-- Env var rows will be added here -->
+                    {{range $svc, $env := .Form.ServiceEnvs}}
+                    <div class="flex flex-col gap-2 p-3 bg-base-200/50 rounded-lg relative group">
+                        <button type="button" onclick="this.parentElement.remove()" class="btn btn-ghost btn-xs btn-square absolute top-2 right-2 text-error">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                        <div class="form-control w-full">
+                            <label class="label label-text text-xs font-semibold pb-1">Service Name</label>
+                            <input type="text" value="{{$svc}}" data-textarea-id="env_{{$svc}}" oninput="updateEnvName(this)" class="input input-sm input-bordered w-full" placeholder="e.g. web, api, db">
+                        </div>
+                        <div class="form-control w-full">
+                            <label class="label label-text text-xs font-semibold pb-1">Variables (.env format)</label>
+                            <textarea id="env_{{$svc}}" name="service_env_{{$svc}}" class="textarea textarea-bordered textarea-sm w-full font-mono text-xs" rows="3" placeholder="KEY=VALUE">{{$env}}</textarea>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+                
+                <button type="button" onclick="addEnvVarRow()" class="btn btn-sm btn-ghost gap-2 w-full mt-2 border-dashed border-base-content/20">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                    Add Service Environment
+                </button>
+            </div>
+        </div>
+
         <div class="form-control">
             <label for="deploy_key">Deploy private key</label>
             <textarea class="textarea textarea-bordered min-h-40 w-full" id="deploy_key" name="deploy_key" rows="8" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">{{.Form.DeployKey}}</textarea>
@@ -79,6 +110,66 @@
     </form>
     </div>
     </article>
+
+    <script>
+        function addEnvVarRow() {
+            const container = document.getElementById('env-vars-container');
+            const id = 'env_' + Date.now();
+            const div = document.createElement('div');
+            div.className = 'flex flex-col gap-2 p-3 bg-base-200/50 rounded-lg relative group animate-in fade-in zoom-in duration-200';
+            div.innerHTML = `
+                <button type="button" onclick="this.parentElement.remove()" class="btn btn-ghost btn-xs btn-square absolute top-2 right-2 text-error">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+                <div class="form-control w-full">
+                    <label class="label label-text text-xs font-semibold pb-1">Service Name</label>
+                    <input type="text" data-textarea-id="${id}" oninput="updateEnvName(this)" class="input input-sm input-bordered w-full" placeholder="e.g. web, api, db">
+                </div>
+                <div class="form-control w-full">
+                    <label class="label label-text text-xs font-semibold pb-1">Variables (.env format)</label>
+                    <textarea name="" id="${id}" class="textarea textarea-bordered textarea-sm w-full font-mono text-xs" rows="3" placeholder="KEY=VALUE"></textarea>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function updateEnvName(input) {
+            const targetId = input.getAttribute('data-textarea-id');
+            if (!targetId) {
+                return;
+            }
+            const textarea = document.getElementById(targetId);
+            if (!textarea) {
+                return;
+            }
+            const value = (input.value || '').trim();
+            if (value) {
+                textarea.name = 'service_env_' + value;
+            } else {
+                textarea.name = '';
+            }
+        }
+
+        function validateEnvVars() {
+            const seen = new Set();
+            const inputs = document.querySelectorAll('textarea[name^="service_env_"]');
+            for (const textarea of inputs) {
+                const name = textarea.name || '';
+                const service = name.replace(/^service_env_/, '').trim();
+                if (!service) {
+                    alert('Please provide a service name for each environment entry.');
+                    return false;
+                }
+                const key = service.toLowerCase();
+                if (seen.has(key)) {
+                    alert('Duplicate service name: ' + service);
+                    return false;
+                }
+                seen.add(key);
+            }
+            return true;
+        }
+    </script>
 </section>
 {{else if eq .Page "detail"}}
 {{template "app-detail-live" .}}

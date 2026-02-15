@@ -146,6 +146,10 @@ func (e *ComposeExecutor) Apply(
 		return strings.TrimSpace(syncLog.String()), fmt.Errorf("compose dir not found: %w", err)
 	}
 
+	// Prepare env var override files if needed (must happen after composeDir is determined)
+	var envFilesCleanup func()
+	var overrideArgs []string
+
 	wroteCompose := false
 	if strings.TrimSpace(content) != "" {
 		if err := os.WriteFile(composeFullPath, []byte(content), 0644); err != nil {
@@ -168,6 +172,20 @@ func (e *ComposeExecutor) Apply(
 	composeFileName := filepath.Base(composeFullPath)
 	projectName := composeProjectName(appID)
 
+	// Prepare env var override files if needed (must use composeDir as base)
+	if len(envVars) > 0 {
+		var envErr error
+		overrideArgs, envFilesCleanup, envErr = e.prepareEnvOverrides(composeDir, envVars)
+		if envErr != nil {
+			appendLogSection(&syncLog, "Environment preparation")
+			appendLogLine(&syncLog, "failed to prepare environment variables")
+			appendLogLine(&syncLog, envErr.Error())
+			emitProgress()
+			return strings.TrimSpace(syncLog.String()), fmt.Errorf("env prepare failed: %w", envErr)
+		}
+		defer envFilesCleanup()
+	}
+
 	appendLogSection(&syncLog, "Compose file")
 	appendLogLine(&syncLog, fmt.Sprintf("path: %s", composeFullPath))
 	appendLogLine(&syncLog, fmt.Sprintf("written_from_request: %t", wroteCompose))
@@ -184,13 +202,21 @@ func (e *ComposeExecutor) Apply(
 	// Pull images
 	appendLogSection(&syncLog, "Docker image pull")
 	e.Logger.Info("Pulling images", "app_id", appID)
+
+	pullArgs := []string{"compose", "-p", projectName, "-f", composeFileName}
+	// Add override file args if any (must come after -f base)
+	if len(overrideArgs) > 0 {
+		pullArgs = append(pullArgs, overrideArgs...)
+	}
+	pullArgs = append(pullArgs, "pull")
+
 	_, err = e.runCommandWithTranscript(
 		ctx,
 		&syncLog,
 		"docker",
-		[]string{"compose", "-p", projectName, "-f", composeFileName, "pull"},
+		pullArgs,
 		composeDir,
-		envVars,
+		nil, // Do not inject process env vars for pull
 		onProgress,
 	)
 	if err != nil {
@@ -201,13 +227,20 @@ func (e *ComposeExecutor) Apply(
 	appendLogSection(&syncLog, "Compose apply")
 	appendLogLine(&syncLog, "build output appears below when services require a build")
 	e.Logger.Info("Applying configuration", "app_id", appID)
+
+	upArgs := []string{"compose", "-p", projectName, "-f", composeFileName}
+	if len(overrideArgs) > 0 {
+		upArgs = append(upArgs, overrideArgs...)
+	}
+	upArgs = append(upArgs, "up", "-d", "--remove-orphans", "--build")
+
 	_, err = e.runCommandWithTranscript(
 		ctx,
 		&syncLog,
 		"docker",
-		[]string{"compose", "-p", projectName, "-f", composeFileName, "up", "-d", "--remove-orphans", "--build"},
+		upArgs,
 		composeDir,
-		envVars,
+		nil,
 		onProgress,
 	)
 	if err != nil {
@@ -253,8 +286,8 @@ func (e *ComposeExecutor) Destroy(ctx context.Context, appID, composePath string
 		if strings.TrimSpace(downOut) != "" {
 			outputs = append(outputs, downOut)
 		}
-		if downErr != nil {
-			return strings.Join(outputs, "\n"), fmt.Errorf("compose down failed: %w", downErr)
+		if downErr != nil && e.Logger != nil {
+			e.Logger.Warn("Compose down failed; proceeding to force cleanup", "app_id", appID, "error", downErr)
 		}
 	}
 
@@ -279,7 +312,6 @@ func (e *ComposeExecutor) Destroy(ctx context.Context, appID, composePath string
 	if !downAttempted && len(containerIDs) == 0 && e.Logger != nil {
 		e.Logger.Info("No running resources found for app", "app_id", appID, "project", projectName)
 	}
-
 	if removeErr := os.RemoveAll(appDirAbs); removeErr != nil {
 		e.Logger.Warn("Failed to remove app runtime directory", "app_id", appID, "dir", appDirAbs, "error", removeErr)
 	}
@@ -410,6 +442,82 @@ func (e *ComposeExecutor) prepareRepo(ctx context.Context, appDir, repoDir, repo
 	}
 
 	return strings.TrimSpace(repoLog.String()), nil
+}
+
+// prepareEnvOverrides creates a compose override file with environment variables.
+// It parses the raw env content and injects it into the "environment" section of the override file.
+// This ensures that ConOps values take precedence over default values defined in the base compose file's "environment" section.
+func (e *ComposeExecutor) prepareEnvOverrides(appDir string, serviceEnvs map[string]string) ([]string, func(), error) {
+	if len(serviceEnvs) == 0 {
+		return nil, func() {}, nil
+	}
+
+	envDir := filepath.Join(appDir, ".envs")
+	if err := os.MkdirAll(envDir, 0700); err != nil {
+		return nil, nil, fmt.Errorf("failed to create env dir: %w", err)
+	}
+
+	var filesToRemove []string
+	cleanup := func() {
+		for _, f := range filesToRemove {
+			_ = os.Remove(f)
+		}
+		_ = os.Remove(envDir) // remove dir if empty
+	}
+
+	// Create the docker-compose.override.yml
+	// We construct it manually to avoid external yaml dependencies.
+	// We use the "environment" list syntax to ensure precedence over base config.
+
+	var override strings.Builder
+	override.WriteString("services:\n")
+
+	for serviceName, rawEnv := range serviceEnvs {
+		if strings.TrimSpace(rawEnv) == "" {
+			continue
+		}
+
+		override.WriteString(fmt.Sprintf("  %s:\n", serviceName))
+		override.WriteString("    environment:\n")
+
+		// Parse lines from the env content
+		lines := strings.Split(rawEnv, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			// Simple key=value validation
+			// We quote the whole string to be safe in YAML list
+			// But we need to escape double quotes inside the string if we use double quotes
+			// Using single quotes is safer for shell-like vars unless they contain single quotes
+
+			// Actually, raw list item in YAML:
+			// - KEY=VALUE
+			// If VALUE contains special chars, we might need quoting.
+			// Let's rely on the fact that these are env vars.
+
+			// We'll use double quotes and escape internal double quotes.
+			escaped := strings.ReplaceAll(line, "\"", "\\\"")
+			override.WriteString(fmt.Sprintf("      - \"%s\"\n", escaped))
+		}
+	}
+
+	overridePath := filepath.Join(envDir, "docker-compose.override.yml")
+	if err := os.WriteFile(overridePath, []byte(override.String()), 0600); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to write override file: %w", err)
+	}
+	filesToRemove = append(filesToRemove, overridePath)
+
+	overrideAbs, err := filepath.Abs(overridePath)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+
+	return []string{"-f", overrideAbs}, cleanup, nil
 }
 
 func (e *ComposeExecutor) buildGitEnv(appDir string, deployKey []byte) (map[string]string, func(), error) {

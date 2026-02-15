@@ -75,13 +75,23 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	credentialsQuery := `
 	CREATE TABLE IF NOT EXISTS app_credentials (
 		app_id TEXT PRIMARY KEY,
-		deploy_key_ciphertext BLOB NOT NULL,
-		deploy_key_nonce BLOB NOT NULL,
+		deploy_key_ciphertext BLOB,
+		deploy_key_nonce BLOB,
+		env_ciphertext BLOB,
+		env_nonce BLOB,
 		FOREIGN KEY(app_id) REFERENCES apps(id) ON DELETE CASCADE
 	);
 	`
 	if _, err := db.Exec(credentialsQuery); err != nil {
 		return nil, fmt.Errorf("failed to create app_credentials table: %w", err)
+	}
+	
+	// Add env_ciphertext and env_nonce columns to app_credentials
+	if err := addSQLiteColumnIfMissing(db, "app_credentials", "env_ciphertext BLOB"); err != nil {
+		return nil, err
+	}
+	if err := addSQLiteColumnIfMissing(db, "app_credentials", "env_nonce BLOB"); err != nil {
+		return nil, err
 	}
 
 	return &SQLiteStore{db: db}, nil
@@ -259,27 +269,37 @@ func (s *SQLiteStore) DeleteApp(ctx context.Context, id string) error {
 
 func (s *SQLiteStore) UpsertAppCredential(ctx context.Context, credential *AppCredential) error {
 	query := `
-	INSERT INTO app_credentials (app_id, deploy_key_ciphertext, deploy_key_nonce)
-	VALUES (?, ?, ?)
+	INSERT INTO app_credentials (app_id, deploy_key_ciphertext, deploy_key_nonce, env_ciphertext, env_nonce)
+	VALUES (?, ?, ?, ?, ?)
 	ON CONFLICT(app_id) DO UPDATE SET
-		deploy_key_ciphertext = excluded.deploy_key_ciphertext,
-		deploy_key_nonce = excluded.deploy_key_nonce
+		deploy_key_ciphertext = CASE WHEN excluded.deploy_key_ciphertext IS NOT NULL THEN excluded.deploy_key_ciphertext ELSE app_credentials.deploy_key_ciphertext END,
+		deploy_key_nonce = CASE WHEN excluded.deploy_key_nonce IS NOT NULL THEN excluded.deploy_key_nonce ELSE app_credentials.deploy_key_nonce END,
+		env_ciphertext = CASE WHEN excluded.env_ciphertext IS NOT NULL THEN excluded.env_ciphertext ELSE app_credentials.env_ciphertext END,
+		env_nonce = CASE WHEN excluded.env_nonce IS NOT NULL THEN excluded.env_nonce ELSE app_credentials.env_nonce END
 	`
-	_, err := s.db.ExecContext(ctx, query, credential.AppID, credential.DeployKeyCiphertext, credential.DeployKeyNonce)
+	_, err := s.db.ExecContext(ctx, query, credential.AppID, credential.DeployKeyCiphertext, credential.DeployKeyNonce, credential.EnvCiphertext, credential.EnvNonce)
 	return err
 }
 
 func (s *SQLiteStore) GetAppCredential(ctx context.Context, id string) (*AppCredential, error) {
-	query := `SELECT app_id, deploy_key_ciphertext, deploy_key_nonce FROM app_credentials WHERE app_id = ?`
+	query := `SELECT app_id, deploy_key_ciphertext, deploy_key_nonce, env_ciphertext, env_nonce FROM app_credentials WHERE app_id = ?`
 	row := s.db.QueryRowContext(ctx, query, id)
 
 	credential := &AppCredential{}
-	if err := row.Scan(&credential.AppID, &credential.DeployKeyCiphertext, &credential.DeployKeyNonce); err != nil {
+	var deployKeyCiphertext, deployKeyNonce, envCiphertext, envNonce []byte
+
+	if err := row.Scan(&credential.AppID, &deployKeyCiphertext, &deployKeyNonce, &envCiphertext, &envNonce); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrCredentialNotFound
 		}
 		return nil, err
 	}
+	
+	credential.DeployKeyCiphertext = deployKeyCiphertext
+	credential.DeployKeyNonce = deployKeyNonce
+	credential.EnvCiphertext = envCiphertext
+	credential.EnvNonce = envNonce
+
 	return credential, nil
 }
 

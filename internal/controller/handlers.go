@@ -14,13 +14,14 @@ import (
 )
 
 type registerAppRequest struct {
-	Name           string `json:"name"`
-	RepoURL        string `json:"repo_url"`
-	RepoAuthMethod string `json:"repo_auth_method"`
-	DeployKey      string `json:"deploy_key"`
-	Branch         string `json:"branch"`
-	ComposePath    string `json:"compose_path"`
-	PollInterval   string `json:"poll_interval"`
+	Name           string            `json:"name"`
+	RepoURL        string            `json:"repo_url"`
+	RepoAuthMethod string            `json:"repo_auth_method"`
+	DeployKey      string            `json:"deploy_key"`
+	Branch         string            `json:"branch"`
+	ComposePath    string            `json:"compose_path"`
+	PollInterval   string            `json:"poll_interval"`
+	ServiceEnvs    map[string]string `json:"service_envs"`
 }
 
 // RuntimeCleaner performs best-effort runtime cleanup for an app.
@@ -80,7 +81,7 @@ func (h *Handler) RegisterApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Registry.AddWithDeployKey(&app, req.DeployKey); err != nil {
+	if err := h.Registry.AddWithDeployKeyAndEnvs(&app, req.DeployKey, req.ServiceEnvs); err != nil {
 		status := http.StatusConflict
 		errText := strings.ToLower(err.Error())
 		if strings.Contains(errText, "required") || strings.Contains(errText, "invalid") || strings.Contains(errText, "unsupported") {
@@ -185,6 +186,13 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 	}
 	defer zeroBytes(deployKey)
 
+	envVars, err := h.Registry.GetAppEnvs(app.ID)
+	if err != nil {
+		_ = h.Registry.UpdateStatus(app.ID, "error", nil)
+		http.Error(w, fmt.Sprintf("failed to load app envs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	// Derive from Background so the sync survives reverse-proxy or client
 	// disconnects. The reconciler already does this; match that behaviour
 	// and honour the same configurable timeout (default 5m, override with
@@ -197,7 +205,7 @@ func (h *Handler) ForceSyncApp(w http.ResponseWriter, r *http.Request) {
 		syncCtx,
 		app.ID,
 		"",
-		nil,
+		envVars,
 		app.RepoURL,
 		app.Branch,
 		app.ComposePath,

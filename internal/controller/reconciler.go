@@ -225,6 +225,12 @@ func (r *Reconciler) syncApp(app *App) error {
 	}
 	defer zeroBytes(deployKey)
 
+	envVars, err := r.Registry.GetAppEnvs(app.ID)
+	if err != nil {
+		_ = r.Registry.UpdateStatus(app.ID, "error", nil)
+		return fmt.Errorf("failed to load app envs: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), r.Config.SyncTimeout)
 	defer cancel()
 
@@ -233,7 +239,7 @@ func (r *Reconciler) syncApp(app *App) error {
 		ctx,
 		app.ID,
 		"",
-		nil,
+		envVars,
 		app.RepoURL,
 		app.Branch,
 		app.ComposePath,
