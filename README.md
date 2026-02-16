@@ -32,8 +32,52 @@
 
 ---
 
-  ![ConOps Demo](docs/media/conops-demo.gif)
+![ConOps Demo](docs/media/conops-demo.gif)
 
+## Quick Start
+
+### Docker (recommended)
+
+```bash
+docker run \
+  --name conops \
+  -p 8080:8080 \
+  -e CONOPS_RUNTIME_DIR=/tmp/conops-runtime \
+  -v /tmp/conops-runtime:/tmp/conops-runtime \
+  -v conops_data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  anurag1201/conops:latest
+```
+
+Open **http://localhost:8080** and register your first app.
+
+> **Persistence:** This uses SQLite by default. SQLite is fine for daily use, but we recommend
+> PostgreSQL for production. You can pass the Postgres environment variables
+> (`DB_TYPE=postgres` and `DB_CONNECTION_STRING=postgres://...`) to ConOps to
+> enable that.
+
+> **Docker Runtime:** `CONOPS_RUNTIME_DIR` is important when ConOps runs in Docker and talks to the
+> host daemon through `/var/run/docker.sock`. Use a host bind-mounted absolute
+> path so Compose bind mounts and file-based secrets resolve correctly.
+
+### Register your first app
+
+From the UI, click **New App**. Or use the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/apps/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Example Application",
+    "repo_url": "https://github.com/docker/awesome-compose",
+    "repo_auth_method": "public",
+    "branch": "master",
+    "compose_path": "fastapi/compose.yaml",
+    "poll_interval": "30s"
+  }'
+```
+
+Push a commit to the tracked branch and watch ConOps pick it up and deploy.
 
 ## The Problem
 
@@ -64,51 +108,6 @@ You get a web dashboard for visibility and a REST API for automation.
 - **SQLite or PostgreSQL** &mdash; SQLite for single-node, Postgres for production
 - **Single binary** &mdash; no runtime dependencies beyond Docker and Git
 - **Multi-arch Docker image** &mdash; `linux/amd64` and `linux/arm64`
-
-## Quick Start
-
-### Docker (recommended)
-
-```bash
-docker run \
-  --name conops \
-  -p 8080:8080 \
-  -e CONOPS_RUNTIME_DIR=/tmp/conops-runtime \
-  -v /tmp/conops-runtime:/tmp/conops-runtime \
-  -v conops_data:/data \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  anurag1201/conops:latest
-```
-
-Open **http://localhost:8080** and register your first app.
-
-> **Persistence:** This uses SQLite by default. SQLite is fine for daily use, but we recommend
-PostgreSQL for production. You can pass the Postgres environment variables
-(`DB_TYPE=postgres` and `DB_CONNECTION_STRING=postgres://...`) to ConOps to
-enable that. 
-
-> **Docker Runtime:** `CONOPS_RUNTIME_DIR` is important when ConOps runs in Docker and talks to the
-host daemon through `/var/run/docker.sock`. Use a host bind-mounted absolute
-path so Compose bind mounts and file-based secrets resolve correctly.
-
-### Register your first app
-
-From the UI, click **New App**. Or use the API:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/apps/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Example Application",
-    "repo_url": "https://github.com/docker/awesome-compose",
-    "repo_auth_method": "public",
-    "branch": "master",
-    "compose_path": "fastapi/compose.yaml",
-    "poll_interval": "30s"
-  }'
-```
-
-Push a commit to the tracked branch and watch ConOps pick it up and deploy.
 
 ## How It Works
 
