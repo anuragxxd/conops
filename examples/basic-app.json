@@ -1,0 +1,8 @@
+{
+  "name": "My Web App",
+  "repo_url": "https://github.com/myuser/my-app.git",
+  "repo_auth_method": "public",
+  "branch": "main",
+  "compose_path": "docker-compose.yml",
+  "poll_interval": "30s"
+}

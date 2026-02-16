@@ -1,0 +1,9 @@
+{
+  "name": "Private Application",
+  "repo_url": "git@github.com:myorg/private-repo.git",
+  "repo_auth_method": "deploy_key",
+  "deploy_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----",
+  "branch": "main",
+  "compose_path": "docker-compose.yml",
+  "poll_interval": "60s"
+}
