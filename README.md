@@ -35,6 +35,14 @@
   ![ConOps Demo](docs/media/conops-demo.gif)
 
 
+## Documentation
+
+- [Installation Guide](docs/installation.md)
+- [Configuration Reference](docs/installation.md#configuration-reference)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Architecture Deep Dive](docs/architecture.md)
+- [Examples](examples/)
+
 ## The Problem
 
 You're running services with Docker Compose. Deployments are SSH-and-pray. You `git pull` on the server, run `docker compose up -d`, and hope nothing drifted while you weren't looking. There's no audit trail, no automatic rollout on push, and no visibility into what's actually running vs. what's in Git.
