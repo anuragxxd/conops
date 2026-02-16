@@ -26,7 +26,8 @@
   <a href="#features">Features</a> &middot;
   <a href="#how-it-works">How It Works</a> &middot;
   <a href="#configuration">Configuration</a> &middot;
-  <a href="#api-reference">API</a>
+  <a href="#api-reference">API</a> &middot;
+  <a href="examples/">Examples</a>
 </p>
 
 ---
