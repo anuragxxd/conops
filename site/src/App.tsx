@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSlug from 'rehype-slug'
 import rehypeAutolinkHeadings from 'rehype-autolink-headings'
+import GithubSlugger from 'github-slugger'
 import { Github, Copy, Check, Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +23,7 @@ function App() {
   useEffect(() => {
     const lines = readmeContent.split('\n')
     const extractedHeadings: { id: string; text: string; level: number }[] = []
+    const slugger = new GithubSlugger()
     
     // Simple regex to extract H2 and H3 headings
     lines.forEach(line => {
@@ -30,19 +32,11 @@ function App() {
       
       if (h2Match) {
         const text = h2Match[1].trim()
-        const id = text
-          .toLowerCase()
-          .replace(/[^\w\s-]/g, '') // Remove special chars
-          .trim()
-          .replace(/\s+/g, '-')     // Replace spaces with dashes
+        const id = slugger.slug(text)
         extractedHeadings.push({ id, text, level: 2 })
       } else if (h3Match) {
         const text = h3Match[1].trim()
-        const id = text
-          .toLowerCase()
-          .replace(/[^\w\s-]/g, '')
-          .trim()
-          .replace(/\s+/g, '-')
+        const id = slugger.slug(text)
         extractedHeadings.push({ id, text, level: 3 })
       }
     })
@@ -91,7 +85,10 @@ function App() {
             </Button>
           </div>
           
-          <div className="mr-4 hidden md:flex items-center gap-2 font-bold">
+          <div 
+            className="mr-4 hidden md:flex items-center gap-2 font-bold cursor-pointer hover:opacity-80 transition-opacity" 
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          >
             <img src="/docs/media/conops.png" alt="ConOps" className="h-6 w-6" />
             <span>{siteConfig.name}</span>
           </div>

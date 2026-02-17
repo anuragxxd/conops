@@ -22,18 +22,18 @@
 </p>
 
 <p align="center">
-  <a href="#-quick-start">Quick Start</a> &middot;
-  <a href="#-features">Features</a> &middot;
-  <a href="#-usage-guide">Usage Guide</a> &middot;
-  <a href="#-configuration">Configuration</a> &middot;
-  <a href="#-api-reference">API</a>
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#features">Features</a> &middot;
+  <a href="#usage-guide">Usage Guide</a> &middot;
+  <a href="#configuration">Configuration</a> &middot;
+  <a href="#method-2-rest-api--cli">API</a>
 </p>
 
 ---
 
 ![ConOps Demo](docs/media/conops-demo.gif)
 
-## 🚀 Quick Start
+## Quick Start
 
 Run ConOps with a single command:
 
@@ -52,7 +52,7 @@ Open **http://localhost:8080** and click **New App**.
 
 > **Note:** For production use, we recommended using [Docker Compose](#production-setup).
 
-## 🌟 Features
+## Features
 
 - **Git-driven deployments** &mdash; push to your branch, ConOps handles the rest
 - **Continuous reconciliation** &mdash; configurable loop that keeps desired state in sync
@@ -64,7 +64,7 @@ Open **http://localhost:8080** and click **New App**.
 - **SQLite or PostgreSQL** &mdash; SQLite for single-node, Postgres for production
 - **Single binary** &mdash; no runtime dependencies beyond Docker and Git
 
-## 📚 Usage Guide
+## Usage Guide
 
 ConOps can be managed in two ways: via the **Web Dashboard** or the **REST API / CLI**.
 
@@ -163,7 +163,7 @@ curl -X PATCH http://localhost:8080/api/v1/apps/{id} \
 curl -X DELETE http://localhost:8080/api/v1/apps/{id}
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 All configuration is via environment variables.
 
