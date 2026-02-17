@@ -137,7 +137,7 @@ function App() {
               <Button
                 size="icon"
                 variant="ghost"
-                className="absolute top-[3.2rem] right-2 h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-white/10"
+                className="absolute top-[2.5rem] right-2 h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-white/10"
                 onClick={copyToClipboard}
               >
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
@@ -261,7 +261,6 @@ function App() {
       <footer className="border-t py-6 md:py-0">
         <div className="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row md:px-6">
           <p className="text-center text-sm leading-loose text-muted-foreground md:text-left">
-            Built by <a href="https://twitter.com/anurag_1201" target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">Anurag</a>.
             The source code is available on <a href={siteConfig.links.github} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">GitHub</a>.
           </p>
         </div>
