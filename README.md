@@ -83,7 +83,16 @@ ConOps is API-first. Every action available in the UI can be performed via the R
 
 #### CLI Tool (`conops-ctl`)
 
-A robust CLI wrapper is available (build from `cmd/conops-ctl`).
+The `conops-ctl` CLI helps you manage applications from your terminal.
+
+**Installation:**
+
+```bash
+# Install the latest version to /usr/local/bin
+curl -sfL https://raw.githubusercontent.com/anuragxxd/conops/master/install.sh | sudo sh
+```
+
+Or download pre-built binaries from the [Releases](https://github.com/anuragxxd/conops/releases) page.
 
 **Configuration:**
 Set the controller URL if running remotely (defaults to `http://localhost:8080`):
