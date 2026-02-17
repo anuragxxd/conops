@@ -6,8 +6,6 @@ import rehypeAutolinkHeadings from 'rehype-autolink-headings'
 import { Github, Copy, Check, Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
-import { Card } from '@/components/ui/card'
 import { siteConfig } from '@/config'
 import { cn } from '@/lib/utils'
 
