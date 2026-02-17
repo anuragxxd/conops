@@ -128,7 +128,7 @@ function App() {
                 </div>
                 <div className="text-xs text-muted-foreground font-mono">bash</div>
               </div>
-              <div className="p-4 overflow-x-auto bg-black/90 text-gray-100 font-mono text-sm leading-relaxed text-left">
+              <div className="p-3 md:p-4 overflow-x-auto bg-black/90 text-gray-100 font-mono text-xs md:text-sm leading-relaxed text-left">
                 <pre>{siteConfig.hero.installCommand}</pre>
               </div>
               <Button
@@ -228,14 +228,14 @@ function App() {
                   }
                   // Code blocks
                   return (
-                    <div className="relative my-6 rounded-lg bg-black/90 p-4 font-mono text-sm text-gray-100 overflow-x-auto">
+                    <div className="relative my-6 rounded-lg bg-black/90 p-3 md:p-4 font-mono text-xs md:text-sm text-gray-100 overflow-x-auto w-full">
                       <code className={className} {...props}>
                         {children}
                       </code>
                     </div>
                   )
                 },
-                pre: ({node, ...props}) => <pre className="p-0 bg-transparent" {...props} />,
+                pre: ({node, ...props}) => <pre className="p-0 bg-transparent w-full overflow-x-auto" {...props} />,
                 table: ({node, ...props}) => (
                   <div className="my-6 w-full overflow-y-auto">
                     <table className="w-full border-collapse text-sm" {...props} />
